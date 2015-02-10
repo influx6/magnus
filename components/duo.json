@@ -1,0 +1,26 @@
+{
+  "app.js": {
+    "id": "app.js",
+    "type": "js",
+    "mtime": 1423593601000,
+    "src": "",
+    "deps": {},
+    "entry": true
+  },
+  "build/app.js": {
+    "id": "build/app.js",
+    "type": "js",
+    "mtime": 1423593969000,
+    "src": "(function outer(modules, cache, entries){\n\n  /**\n   * Global\n   */\n\n  var global = (function(){ return this; })();\n\n  /**\n   * Require `name`.\n   *\n   * @param {String} name\n   * @param {Boolean} jumped\n   * @api public\n   */\n\n  function require(name, jumped){\n    if (cache[name]) return cache[name].exports;\n    if (modules[name]) return call(name, require);\n    throw new Error('cannot find module \"' + name + '\"');\n  }\n\n  /**\n   * Call module `id` and cache it.\n   *\n   * @param {Number} id\n   * @param {Function} require\n   * @return {Function}\n   * @api private\n   */\n\n  function call(id, require){\n    var m = cache[id] = { exports: {} };\n    var mod = modules[id];\n    var name = mod[2];\n    var fn = mod[0];\n\n    fn.call(m.exports, function(req){\n      var dep = modules[id][1][req];\n      return require(dep ? dep : req);\n    }, m, m.exports, outer, modules, cache, entries);\n\n    // expose as `name`.\n    if (name) cache[name] = cache[id];\n\n    return cache[id].exports;\n  }\n\n  /**\n   * Require all entries exposing them on global if needed.\n   */\n\n  for (var id in entries) {\n    if (entries[id]) {\n      global[entries[id]] = require(id);\n    } else {\n      require(id);\n    }\n  }\n\n  /**\n   * Duo flag.\n   */\n\n  require.duo = true;\n\n  /**\n   * Expose cache.\n   */\n\n  require.cache = cache;\n\n  /**\n   * Expose modules\n   */\n\n  require.modules = modules;\n\n  /**\n   * Return newest require.\n   */\n\n   return require;\n})({\n1: [function(require, module, exports) {\n\n}, {}]}, {}, {\"1\":\"\"})\n",
+    "deps": {},
+    "entry": true
+  },
+  "build/build/app.js": {
+    "id": "build/build/app.js",
+    "type": "js",
+    "mtime": 1423593910000,
+    "src": "(function outer(modules, cache, entries){\n\n  /**\n   * Global\n   */\n\n  var global = (function(){ return this; })();\n\n  /**\n   * Require `name`.\n   *\n   * @param {String} name\n   * @param {Boolean} jumped\n   * @api public\n   */\n\n  function require(name, jumped){\n    if (cache[name]) return cache[name].exports;\n    if (modules[name]) return call(name, require);\n    throw new Error('cannot find module \"' + name + '\"');\n  }\n\n  /**\n   * Call module `id` and cache it.\n   *\n   * @param {Number} id\n   * @param {Function} require\n   * @return {Function}\n   * @api private\n   */\n\n  function call(id, require){\n    var m = cache[id] = { exports: {} };\n    var mod = modules[id];\n    var name = mod[2];\n    var fn = mod[0];\n\n    fn.call(m.exports, function(req){\n      var dep = modules[id][1][req];\n      return require(dep ? dep : req);\n    }, m, m.exports, outer, modules, cache, entries);\n\n    // expose as `name`.\n    if (name) cache[name] = cache[id];\n\n    return cache[id].exports;\n  }\n\n  /**\n   * Require all entries exposing them on global if needed.\n   */\n\n  for (var id in entries) {\n    if (entries[id]) {\n      global[entries[id]] = require(id);\n    } else {\n      require(id);\n    }\n  }\n\n  /**\n   * Duo flag.\n   */\n\n  require.duo = true;\n\n  /**\n   * Expose cache.\n   */\n\n  require.cache = cache;\n\n  /**\n   * Expose modules\n   */\n\n  require.modules = modules;\n\n  /**\n   * Return newest require.\n   */\n\n   return require;\n})({\n1: [function(require, module, exports) {\n(function outer(modules, cache, entries){\n\n  /**\n   * Global\n   */\n\n  var global = (function(){ return this; })();\n\n  /**\n   * Require `name`.\n   *\n   * @param {String} name\n   * @param {Boolean} jumped\n   * @api public\n   */\n\n  function require(name, jumped){\n    if (cache[name]) return cache[name].exports;\n    if (modules[name]) return call(name, require);\n    throw new Error('cannot find module \"' + name + '\"');\n  }\n\n  /**\n   * Call module `id` and cache it.\n   *\n   * @param {Number} id\n   * @param {Function} require\n   * @return {Function}\n   * @api private\n   */\n\n  function call(id, require){\n    var m = cache[id] = { exports: {} };\n    var mod = modules[id];\n    var name = mod[2];\n    var fn = mod[0];\n\n    fn.call(m.exports, function(req){\n      var dep = modules[id][1][req];\n      return require(dep ? dep : req);\n    }, m, m.exports, outer, modules, cache, entries);\n\n    // expose as `name`.\n    if (name) cache[name] = cache[id];\n\n    return cache[id].exports;\n  }\n\n  /**\n   * Require all entries exposing them on global if needed.\n   */\n\n  for (var id in entries) {\n    if (entries[id]) {\n      global[entries[id]] = require(id);\n    } else {\n      require(id);\n    }\n  }\n\n  /**\n   * Duo flag.\n   */\n\n  require.duo = true;\n\n  /**\n   * Expose cache.\n   */\n\n  require.cache = cache;\n\n  /**\n   * Expose modules\n   */\n\n  require.modules = modules;\n\n  /**\n   * Return newest require.\n   */\n\n   return require;\n})({\n1: [function(require, module, exports) {\n\n}, {}]}, {}, {\"1\":\"\"})\n\n}, {}]}, {}, {\"1\":\"\"})\n",
+    "deps": {},
+    "entry": true
+  }
+}
