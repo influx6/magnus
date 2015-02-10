@@ -7,25 +7,36 @@
 
 var _ = require('stackq');
 var grid = require('grids');
+var domain = require('./domain');
+
 module.exports = _.Mask(function(){
 
   var self = this;
 
+  // this.ResultType = _.Checker.Type(_.valids.Object);
+
+  // this.ComponentArg = _.Checker({
+  //   atom: _.GhostCursor.instanceBelongs,
+  //   data: _.funcs.maybe(_.valids.Object),
+  //   attr: _.funcs.maybe(_.valids.Object),
+  // });
+
+  // this.ElementType = _.Checker({
+  //   type: _.valids.String,
+  //   data: _.funcs.maybe(_.valids.Object),
+  //   attr: _.funcs.maybe(_.valids.Object),
+  //   // children: _.funcs.maybe(_.valids.List),
+  // });
+
   this.Element = _.Immutate.extends({
-    init: function(map){
-      _.Asserted(_.valids.Object(map),'an object must be passed as argument');
-      _.Asserted(_.valids.String(map.type),'an object must be passed as argument');
-      if(_.valids.contains(map,'attr')){
-        _.Asserted(_.valids.Object(map['attr']),'attr key must have an object map as value');
-      }
-      if(_.valids.contains(map,'data')){
-        _.Asserted(_.valids.Object(map['data']),'data key must have an object map as value');
-      }
-      if(_.valids.contains(map,'children')){
-        _.Asserted(_.valids.List(map['children']) || _.valids.Primitive(map['children']),'children key must be either a primitive or a list containing only primitive, maps or magnus.Elements');
-      }
+    init: function(map,component){
+      domain.ElementType.is(map,function(s,r){
+        _.Asserted(s,_.Util.String(' ',_.Util.toJSON(r),'does not match critera for elem creation'));
+      });
+
       this.$super(map);
       this.tag = map.type;
+      this.component = component;
     },
     isElement: function(){
       return true;
@@ -65,6 +76,7 @@ module.exports = _.Mask(function(){
          if(_.valids.isPrimitive(f)) return f;
          if(f.isValueCursor()) return f.value();
          if(f.isObjectCursor()){
+
            if(this.Element.instanceBelongs(f.owner)){
              if(done.indexOf(f) !== -1) return;
              done.push(f);
@@ -99,9 +111,6 @@ module.exports = _.Mask(function(){
       return build.join('');
     });
   
-    // done.length = 0;
-    // done = null;
-
     return {
       elemCache: cache,
       markup: f.values().join('')
@@ -109,10 +118,42 @@ module.exports = _.Mask(function(){
   });
 
   this.unsecure('transformHTMl',function(markup){
-
   });
 
 
+  this.Component = _.Configurable.extends({
+    init: function(type,map,fn){
+      domain.ComponentArg.is(map,function(s,r){
+        _.Asserted(s,_.Util.String(' ','map does not match component critera: '+_.Util.toJSON(r)));
+      });
+      this.map = map;
+      this.type = type;
+      this.atom = map.atom;
+      
+      var res = {};
+      res.type = this.type;
+      if(map.attr) res.attr = this.map.attr;
+      if(map.data) res.data = this.map.data;
+
+      var kids = fn.call(this,res);
+      domain.ResultType.is(res,function(s,r){
+        _.Asserted(s,_.Util.String(' ','result is not a map',_.funcs.toJSON(r)));
+      });
+      
+      if(_.valids.exists(kids)) res.children = kids;
+
+
+      //adds component meta details
+      this.elem = self.createElement(res,this);
+      map.type = type;
+    },
+    data: function(){
+      return this.atom.seq();
+    },
+    render: function(){
+      return this.elem;
+    },
+  });
 
 });
 
