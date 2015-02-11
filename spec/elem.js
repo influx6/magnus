@@ -25,6 +25,7 @@ var denis = list.make({ atom: data.ghost('name') });
 var atomic = atom.make({
   atom: data.ghost('label'),
   attr: { id: data.ghost('name') },
+  data: { id: data.ghost('date') },
 },function(){
   return [this.atom,denis];
 });
@@ -33,9 +34,8 @@ var atomic = atom.make({
 console.log(magnus.renderHTML(atomic.render()).markup);
 console.log(magnus.renderHTML(denis.render()).markup);
 
-data.ghost().set('label','i hate you');
-data.ghost().set('name','winston');
-// data.ghost('name').set('window');
+data.get().set('label','i hate you');
+data.get().set('name','winston');
 
 console.log(magnus.renderHTML(atomic.render()).markup);
 console.log(magnus.renderHTML(denis.render()).markup);

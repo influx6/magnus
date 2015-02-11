@@ -89,13 +89,13 @@ module.exports = _.Mask(function(){
 
 
     var f = tag.map(function(f){
-      var build = ['<',f,' '], props = [], content = [];
-      if(attr) props.push(attr.values().join(' '));
-      if(data) props.push(data.values().join(' '));
+      var build = ['<',f], props = [], content = [];
+      if(attr){ props.push(' '); props.push(attr.values().join(' ')); }
+      if(data){ props.push(' '); props.push(data.values().join(' ')); }
       if(kids) content.push(kids.values().join(' '));
-      build.push(props.join(' '));
+      build.push(props.join(''));
       build.push('>');
-      build.push(' ');
+      build.push('');
       build.push(content.join(' '));
       build.push(['</',f,'>'].join(''))
       return build.join('');
@@ -139,7 +139,7 @@ module.exports = _.Mask(function(){
              return v;
           }).values();
         }
-      }
+      };
 
 
       //adds component meta details
