@@ -62,7 +62,6 @@ module.exports = _.Mask(function(){
          if(_.valids.isPrimitive(f)) return f;
 
          var isc = _.GhostCursor.instanceBelongs(f);
-         // console.log('rendering kids','is ghost:',isc,f.isValueCursor());
 
          if(f.isValueCursor()) return f.value();
          if(f.isObjectCursor()){
@@ -132,13 +131,13 @@ module.exports = _.Mask(function(){
       });
       
       if(_.valids.exists(kids)){
-        if(_.valids.Collection(kids)){
-          res.children = _.Sequence.value(kids).mapobj(function(v){
+        if(_.Cursor.instanceBelongs(kids)) res.children = kids;
+        else{
+          var rep = _.valids.List(kids) ? kids : [kids];
+          res.children = _.Sequence.value(rep).mapobj(function(v){
              if(self.Component.instanceBelongs(v)) return v.render();
              return v;
           }).values();
-        }else{
-          res.children = kids;
         }
       }
 

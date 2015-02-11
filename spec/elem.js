@@ -20,22 +20,23 @@ var data = _.Immutate.transform({
   date: Date.now(),
 });
 
-
-var denis = list.make({ atom: data.ghost('name')});
+var denis = list.make({ atom: data.ghost('name') });
 
 var atomic = atom.make({
   atom: data.ghost('label'),
   attr: { id: data.ghost('name') },
 },function(){
-  return [this.atom.value(), denis];
+  return [this.atom,denis];
 });
 
-var gh = data.ghost('name');
-var snap = data.snapshot('name');
 
 console.log(magnus.renderHTML(atomic.render()).markup);
+console.log(magnus.renderHTML(denis.render()).markup);
 
-data.get().set('name','winston');
+data.ghost().set('label','i hate you');
+data.ghost().set('name','winston');
+// data.ghost('name').set('window');
 
 console.log(magnus.renderHTML(atomic.render()).markup);
+console.log(magnus.renderHTML(denis.render()).markup);
 
