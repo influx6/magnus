@@ -141,7 +141,6 @@ module.exports = _.Mask(function(){
         }
       };
 
-
       //adds component meta details
       this.elem = self.createElement(res,this);
       map.type = type;

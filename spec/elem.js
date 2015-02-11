@@ -25,7 +25,7 @@ var denis = list.make({ atom: data.ghost('name') });
 var atomic = atom.make({
   atom: data.ghost('label'),
   attr: { id: data.ghost('name') },
-  data: { id: data.ghost('date') },
+  data: { id: data.hash() },
 },function(){
   return [this.atom,denis];
 });
