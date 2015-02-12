@@ -1,0 +1,3 @@
+global.magnus = require('magnus');
+
+

@@ -12,10 +12,8 @@ var domain = require('./domain');
 
 //create inplace holder to allow internal server and client usage
 var isBrowser = _.valids.contains(root,'window');
-var win = isBrowser ? root['window'] : { };
-win.doc = isBrowser ? win['document'] : {};
 
-module.exports = _.Mask(function(){
+var Magnus = _.Mask(function(){
 
   var self = this;
 
@@ -151,7 +149,7 @@ module.exports = _.Mask(function(){
     init: function(comp){
       core.Assert(isBrowser,'only works client sided with an html dom');
       this.$super(comp);
-      this.fragment = doc.createElement();
+      this.fragment = global.document.createElement();
     }
   });
 
@@ -218,4 +216,5 @@ module.exports = _.Mask(function(){
 });
 
 
-
+global.Magnus = Magnus;
+module.exports = Magnus;
