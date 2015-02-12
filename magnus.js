@@ -4,10 +4,16 @@
  *  alwas be include along with any copy or usage or amending of 
  *  the code
  */
+var root = this;
 
 var _ = require('stackq');
 var grid = require('grids');
 var domain = require('./domain');
+
+//create inplace holder to allow internal server and client usage
+var isBrowser = _.valids.contains(root,'window');
+var win = isBrowser ? root['window'] : { };
+win.doc = isBrowser ? win['document'] : {};
 
 module.exports = _.Mask(function(){
 
@@ -111,6 +117,52 @@ module.exports = _.Mask(function(){
   });
 
 
+  this.Rendering = _.Configurable.extends({
+    init: function(comp){
+      _.Asserted(self.Component.instanceBelongs(comp),'only magnus.Component instance allowed')
+      this.component = comp;
+      this.hash = null;
+      this.cache = null;
+    },
+    render: function(){
+      if(this.component.hash() === this.hash){
+        if(_.valids.exists(this.cache)) return this.cache.markup
+        this.cache = self.renderHTML(this.component.element());
+        return this.cache.markup;
+      }
+      this.hash = this.component.hash();
+      this.cache = self.renderHTML(this.component.element());
+      return this.cache.markup;
+    },
+  },{
+    select: function(comp){
+      if(!!isBrowser) return self.ClientRender.make(comp);
+      return self.ServerRender.make(comp);
+    }
+  });
+
+  this.ServerRender = this.Rendering.extends({
+    init: function(comp){
+      this.$super(comp);
+    }
+  });
+
+  this.ClientRender = this.Rendering.extends({
+    init: function(comp){
+      core.Assert(isBrowser,'only works client sided with an html dom');
+      this.$super(comp);
+      this.fragment = doc.createElement();
+    }
+  });
+
+  this.RenderTree = _.Configurable.extends({
+    init: function(component){
+    },
+    render: function(){
+      
+    },
+  });
+
   this.Component = _.Configurable.extends({
     init: function(type,map,fn){
       domain.ComponentArg.is(map,function(s,r){
@@ -125,6 +177,8 @@ module.exports = _.Mask(function(){
       if(map.attr) res.attr = this.map.attr;
       if(map.data) res.data = this.map.data;
 
+      // if(res.data) res.data.hash = this.atom.hash();
+      // else{ res.data = { hash: this.atom.hash() };  };
       var kids = fn.call(this,res);
       domain.ResultType.is(res,function(s,r){
         _.Asserted(s,_.Util.String(' ','result is not a map',_.funcs.toJSON(r)));
@@ -135,7 +189,7 @@ module.exports = _.Mask(function(){
         else{
           var rep = _.valids.List(kids) ? kids : [kids];
           res.children = _.Sequence.value(rep).mapobj(function(v){
-             if(self.Component.instanceBelongs(v)) return v.render();
+             if(self.Component.instanceBelongs(v)) return v.element();
              return v;
           }).values();
         }
@@ -143,13 +197,21 @@ module.exports = _.Mask(function(){
 
       //adds component meta details
       this.elem = self.createElement(res,this);
+      //add rendering handler and configuration
+      this.rendering = self.Rendering.select(this);
       map.type = type;
+    },
+    element: function(){
+      return this.elem;
+    },
+    hash: function(){
+     return this.elem.ghost().sHash();
     },
     data: function(){
       return this.atom;
     },
     render: function(){
-      return this.elem;
+      return this.rendering.render();
     },
   });
 
