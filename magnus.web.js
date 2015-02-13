@@ -17,7 +17,7 @@ domain.ElementType = _.Checker({
   attr: _.funcs.maybe(_.valids.Object),
 });
 
-},{"stackq":8}],2:[function(require,module,exports){
+},{"stackq":7}],2:[function(require,module,exports){
 (function (global){
 /* Released under the MIT license*
  *
@@ -28,11 +28,12 @@ domain.ElementType = _.Checker({
 var root = this;
 
 var _ = require('stackq');
-var grid = require('grids');
-var domain = require('./domain');
+// var grid = require('grids');
+var domain = require('./domain.js');
+var shims = require('./shims.js');
 
 //create inplace holder to allow internal server and client usage
-var isBrowser = _.valids.contains(root,'window');
+var isBrowser = _.valids.contains(global,'document');
 
 var Magnus = _.Mask(function(){
 
@@ -132,26 +133,39 @@ var Magnus = _.Mask(function(){
     };
   });
 
-  this.unsecure('transformHTMl',function(markup){
-  });
+  // this.unsecure('transformHTMl',function(markup){
+  // });
 
 
   this.Rendering = _.Configurable.extends({
     init: function(comp){
       _.Asserted(self.Component.instanceBelongs(comp),'only magnus.Component instance allowed')
+      this.$super();
       this.component = comp;
       this.hash = null;
       this.cache = null;
+      this.pub('render');
+    },
+    hasChange: function(){
+      if(this.component.hash() === this.hash) return false;
+      return true;
     },
     render: function(){
-      if(this.component.hash() === this.hash){
+      if(!this.hasChange()){
         if(_.valids.exists(this.cache)) return this.cache.markup
         this.cache = self.renderHTML(this.component.element());
         return this.cache.markup;
       }
+      this.emit('render');
       this.hash = this.component.hash();
       this.cache = self.renderHTML(this.component.element());
       return this.cache.markup;
+    },
+    mount: function(node){
+      _.Asserted(false,'implement in child');
+    },
+    unmount: function(){
+      _.Asserted(false,'implement in child');
     },
   },{
     select: function(comp){
@@ -163,22 +177,116 @@ var Magnus = _.Mask(function(){
   this.ServerRender = this.Rendering.extends({
     init: function(comp){
       this.$super(comp);
-    }
+    },
+    unmount: function(node){
+      return;
+    },
+    mountParent: function(node){
+      return;
+    },
   });
 
   this.ClientRender = this.Rendering.extends({
     init: function(comp){
-      core.Assert(isBrowser,'only works client sided with an html dom');
+      _.Asserted(isBrowser,'only works client sided with an html dom');
       this.$super(comp);
-      this.fragment = global.document.createElement();
-    }
+      this.fragment = global.document.createDocumentFragment();
+      this.sourceMunch = global.document.createElement('div');
+      this.target = null;
+      this.parent = null;
+      this.pub('plugged');
+      this.pub('unplugged');
+    },
+    mount: function(node){
+      if(_.valids.exists(this.parent)){
+        this.parent.removeChild(this.target);
+      }
+      this.parent = node;
+      this.render();
+      this.emit('plugged');
+    },
+    render: function(){
+      if(!this.hasChange()) return this.cache.markup;
+      var s = this.$super();
+      if(_.valids.exists(this.parent)){
+        if(this.target) this.parent.removeChild(this.target);
+        this.sourceMunch.innerHTML = s;
+        this.fragment.appendChild(this.sourceMunch.firstChild);
+        this.target = this.fragment.firstChild;
+        this.target.magnus = 1;
+        this.target.hash = this.component.hash();
+        this.target.setAttribute('hash',this.target.hash);
+        this.parent.appendChild(this.fragment);
+      }
+      return s;
+    },
+    unmount: function(){
+      if(_.valids.exists(this.parent)){
+        this.parent.removeChild(this.target);
+        this.emit('unplugged');
+      }
+    },
   });
 
   this.RenderTree = _.Configurable.extends({
-    init: function(component){
+    init: function(pre){
+       this.$super();
+       this.heartbeat = _.Switch();
+       this.renders = _.Sequence.value([]);
+       this.precontent = [pre];
+       var cur = null;
+       this.$secure('frame',function(f){
+         return (cur = this.render(f));
+       });
+       this.$unsecure('currentRender',function(){
+         return cur;
+       });
+       this.heartbeat.on();
+       this.pub('rendered');
     },
-    render: function(){
-      
+    mountRendering: function(rendering){
+      _.Asserted(self.Rendering.instanceBelongs(rendering),'only rendering instances allowed!');
+      if(this.renders.hasValue(rendering)) return;
+      this.renders.push(rendering);
+    },
+    unmountRendering: function(rendering){
+      _.Asserted(self.Rendering.instanceBelongs(rendering),'only rendering instances allowed!');
+      this.renders.remove(rendering);
+    },
+    mount: function(c,p){
+      _.Asserted(self.Component.instanceBelongs(c),'only component instances allowed!');
+      c.mount(p);
+      this.mountRendering(c.context());
+    },
+    unmount: function(c,p){
+      _.Asserted(self.Component.instanceBelongs(c),'only component instances allowed!');
+      this.unmountRendering(c.context());
+    },
+    render: function(f){
+      var prd = [].concat(this.precontent)
+      var pr = this.renders.map(function(v){ return v.render(f); }).values();
+      prd = prd.concat(_.valids.List(pr) ? pr : [pr]);
+      this.emit('rendered',prd);
+      return prd;
+    },
+    isRendering: function(){ return this.heartbeat.isOn(); },
+  },{
+    select: function(pre){
+      if(!!isBrowser) return self.ClientTree.make(pre);
+      return self.ServerTree.make(pre);
+    }
+  });
+
+  this.ServerTree = this.RenderTree.extends({});
+
+  this.ClientTree = this.RenderTree.extends({
+    init:function(c){
+      _.Asserted(isBrowser,'only works client sided with an html dom');
+     this.$super(c)
+     this.clockFrame = shims.createFrame(this.frame);
+    },
+    onFrame: function(){
+      return this.clockFrame;
     },
   });
 
@@ -187,17 +295,27 @@ var Magnus = _.Mask(function(){
       domain.ComponentArg.is(map,function(s,r){
         _.Asserted(s,_.Util.String(' ','map does not match component critera: '+_.Util.toJSON(r)));
       });
+      this.$super();
       this.map = map;
       this.type = type;
       this.atom = map.atom;
       
+      this.pub('ready');
+      this.pub('live');
+
       var res = {};
       res.type = this.type;
       if(map.attr) res.attr = this.map.attr;
       if(map.data) res.data = this.map.data;
 
+      // if(res.attr){
+      //   res.attr.hash = 0
+      // }else{
+      //   res.attr = { hash: 0 };
+      // }
       // if(res.data) res.data.hash = this.atom.hash();
       // else{ res.data = { hash: this.atom.hash() };  };
+      
       var kids = fn.call(this,res);
       domain.ResultType.is(res,function(s,r){
         _.Asserted(s,_.Util.String(' ','result is not a map',_.funcs.toJSON(r)));
@@ -216,10 +334,20 @@ var Magnus = _.Mask(function(){
 
       //adds component meta details
       this.elem = self.createElement(res,this);
+      //get the attr ghost
+      var attrg = this.elem.ghost('attr');
       //add rendering handler and configuration
       this.rendering = self.Rendering.select(this);
+
+      this.rendering.before('render',this.$bind(function(){
+        // console.log('attrg',attrg)
+        // attrg.set('hash',this.hash());
+      }));
+
       map.type = type;
+      this.emit('ready');
     },
+    context: function(){ return this.rendering; },
     element: function(){
       return this.elem;
     },
@@ -232,308 +360,95 @@ var Magnus = _.Mask(function(){
     render: function(){
       return this.rendering.render();
     },
+    mount: function(p){
+      return this.rendering.mount(p);
+    },
+    unmount: function(){
+      return this.rendering.unmount();
+    }
   });
 
 });
 
 
-global.Magnus = Magnus;
+Magnus.ComponentBlueprint = function(type,attr){
+  return Magnus.Component.extends({
+    init: function(map,fn){
+      this.$super(type,map,fn);
+    },
+  }).mixin(attr);
+};
+
+Magnus.Shims = shims;
+
+Magnus.Client = function(id){
+  _.Asserted(isBrowser,'only works client sided with an html dom');
+  _.Asserted(_.valids.String(id),'first arg* must be a string');
+
+  var co = _.Mask(function(){
+  
+    this.id = id;
+    // var rootdom = n || global.document.body;
+    var dom = Magnus.RenderTree.select('');
+    var components = _.Sequence.value([]);
+    var blueprint = _.Sequence.value({});
+
+    this.secure('include',function(com,fx){
+      _.Asserted(Magnus.Component.instanceBelongs(com),'only component instances allowed!');
+      if(!this.components().hasValue(com)) this.components().push(com);
+      return (_.valids.Function(fx) ? fx.call(this,com) : null);
+    });
+    
+    this.secure('Blueprint',function(n){
+      if(blueprint.hasKey(n)) return;
+      blueprint.set(n,Magnus.ComponentBlueprint(n));
+      //lets shim it so we can get recognized
+      delete (global.document.createElement(n));
+    });
+
+    this.secure('create',function(n,map,fn,root){
+      if(!blueprint.hasKey(n)) return;
+      var bp = blueprint.get(n);
+      var bpi = bp.make(map,fn);
+      if(root) this.render(root,bpi);
+      return bpi;
+    });
+
+    this.secure('blueprints',function(){
+      return blueprint;
+    });
+
+    this.secure('dom',function(){
+      return dom;
+    });
+   
+    this.secure('components',function(){
+      return components;
+    });
+
+    this.secure('render',function(root,component){
+       return this.include(component,function(){
+         return this.dom().mount(component,root);
+       });
+    });
+
+    this.secure('unrender',function(component){
+       return this.include(component,function(){
+         return this.dom().unmount(component);
+       });
+    });
+
+  });
+
+  return co;
+};
+
 module.exports = Magnus;
+global.Magnus = Magnus;
+
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./domain":1,"grids":3,"stackq":8}],3:[function(require,module,exports){
-"use strict";
-
-var stacks = require("stackq");
-
-var ChannelBits = exports.ChannelBits = stacks.Configurable.extends({
-    init: function(p){
-      stacks.Asserted(Print.instanceBelongs(p),'root must be a Print instance or child instance');
-      this.root = p;
-      this.connections = stacks.Storage.make('connections-bits');
-    }
- }).muxin({
-   addBit: function(chan){
-     if(stacks.valids.not.String(chan)) return;
-     this.connections.add(chan,stacks.Storage.make(chan))
-   },
-   bit: function(chan){
-     if(stacks.valids.not.String(chan)) return;
-     return this.connections.get(chan);
-  },
-   add: function(chan,plug,xchan){
-     if(stacks.valids.not.String(chan)) return;
-     if(!Print.instanceBelongs(plug)) return;
-     var f = this.bit(chan),fp;
-     if(!f.has(plug.GUUID)) f.add(plug.GUUID,[]);
-     fp = f.get(plug.GUUID);
-     fp.push(xchan);
-   },
-   remove: function(chan,plug,xchan){
-     if(stacks.valids.not.String(chan)) return;
-     if(!Print.instanceBelongs(plug)) return;
-     var f = this.bit(chan),fp;
-     if(!f.has(plug.GUUID)) f.add(plug.GUUID,[]);
-     fp = f.get(plug.GUUID);
-     var ind = fp.indexOf(xchan);
-     fp[ind] = null;
-     stacks.deferCleanArray(fp);
-   },
-   removeAll: function(plug){
-     if(!Print.instanceBelongs(plug)) return;
-     this.connections.each(function(e,i){
-       if(e.has(plug.GUUID)) e.remove(plug.GUUID);
-     });
-   },
-   toObject: function(){
-     var p = {};
-     this.connections.each(function(e,i){
-       if(e.clone){
-         p[i] = e.clone();
-       }
-     });
-     return p;
-   }
-});
-
-var Print = exports.Print = stacks.Configurable.extends({
-  init: function(conf,id,fn){
-    stacks.Asserted(stacks.valids.Object(conf),'first argument must be a map of properties');
-    stacks.Asserted(stacks.valids.String(id),'second argument must be a stringed "id" for the plug');
-    this.$super();
-    var self = this,network;
-
-    this.id = id;
-    this.config(conf);
-
-    this.plugs = stacks.Storage.make('Print');
-    this.aliases = stacks.Storage.make('aliases');
-    this.connects = ChannelBits.make(this);
-
-    this.ignoreFilter = stacks.Switch();
-    this.packetBlock = stacks.Proxy(this.$bind(function(d,n,e){
-      if(stacks.StreamPackets.isPacket(d)){
-        d.traces.push(this.GUUID);
-      }
-      return n();
-    }));
-    this.filterBlock = stacks.Proxy(this.$bind(function(d,n,e){
-      if(!stacks.StreamPackets.isPacket(d)) return;
-      if(d.from() !== this){
-        if(stacks.valids.contains(d.body,'$filter') && !this.ignoreFilter.isOn()){
-          if(d.body['$filter'] !== '*' && d.body['$filter'] !== this.id) return;
-        }
-      }
-      return n();
-    }));
-    this.channelStore = stacks.ChannelStore.make(this.id);
-    this.makeName = this.$bind(function(sn){
-      if(stacks.valids.not.String(sn)){ return; }
-      return [this.id,sn].join('.');
-    });
-    this.imprint = this.$bind(function(plug){
-      if(!Print.instanceBelongs(plug)) return;
-      if(stacks.valids.Function(fn)) fn.call(plug);
-      return plug;
-    });
-
-    this.pub('boot');
-    this.pub('attachPrint');
-    this.pub('detachPrint');
-    this.pub('detachAll');
-    this.pub('detachAllIn');
-    this.pub('detachAllOut');
-    this.pub('releaseOut');
-    this.pub('releaseIn');
-    this.pub('networkAttached');
-    this.pub('networkDetached');
-
-    this.store = this.$bind(function(){ return this.channelStore; });
-
-    this.newIn = this.$bind(function(id,tag,picker){
-      return this.channelStore.newIn((id),"*",picker)(this.$bind(function(tk){
-          this.connects.addBit(id);
-          tk.mutate(this.packetBlock.proxy);
-          tk.mutate(this.filterBlock.proxy);
-          tk.Packets = tk.$ = stacks.StreamPackets.proxy(function(){
-            this.useFrom(self);
-            tk.emit(this);
-          });
-      }));
-    });
-
-    this.newOut = this.$bind(function(id,tag,picker){
-      return this.channelStore.newOut((id),tag || "*",picker)(this.$bind(function(tk){
-          this.connects.addBit(id);
-          tk.mutate(this.packetBlock.proxy);
-          tk.mutate(this.filterBlock.proxy);
-          tk.Packets = tk.$ = stacks.StreamPackets.proxy(function(){
-            this.useFrom(self);
-            tk.emit(this);
-          });
-          tk.p = tk.Packets;
-      }));
-    });
-
-    this.pack = this.$bind(function(print,id){
-      this.plugs.add(print.GUUID,print);
-      this.aliases.add(id,print.GUUID);
-      return print;
-    });
-
-    this.locate = this.$bind(function(id){
-      return this.plugs.get(this.aliases.has(id) ? this.aliases.get(id) : id);
-    });
-
-    this.unpack = this.$bind(function(print){
-      this.plugs.add(Print.instanceBelong(print) ? print.GUUID : print);
-      return Print;
-    });
-
-    this.newIn('in');
-    this.newOut('out');
-    this.newOut('err');
-
-    this.disableFiltering();
-    this.channelStore.hookBinderProxy(this);
-
-    this.$dot(fn);
-  },
-  enableFiltering: function(){ this.ignoreFilter.off(); },
-  disableFiltering: function(){ this.ignoreFilter.on(); },
-  in: function(f){
-    if(stacks.valids.not.String(f)) f = 'in';
-    return this.channelStore.in(f);
-  },
-  out: function(f){
-    if(stacks.valids.not.String(f)) f = 'out';
-    return this.channelStore.out(f);
-  },
-  hasIn: function(f){
-    if(stacks.valids.not.String(f)) return;
-    return this.channelStore.hasIn(f);
-  },
-  hasOut: function(f){
-    if(stacks.valids.not.String(f)) return;
-    return this.channelStore.hasOut(f);
-  },
-  releaseOut: function(xchan){
-    if(stacks.valids.String(xchan) && !this.hasOut(xchan)) return;
-    var xc = this.out(xchan);
-    xc.unbindAll();
-    this.emit('releaseOut',xchan);
-  },
-  releaseIn: function(xchan){
-    if(stacks.valids.String(xchan) && !this.hasIn(xchan)) return;
-    var xc = this.out(xchan);
-    xc.unbindAll();
-    this.emit('releaseIn',xchan);
-  },
-  detachAll: function(){
-    this.store().unbindAllIn();
-    this.store().unbindAllOut();
-    this.emit('detachAll');
-  },
-  detachAllOut: function(){
-    this.store().unbindAllOut();
-    this.emit('detachAllOut');
-  },
-  detachAllIn: function(){
-    this.store().unbindAllIn();
-    this.emit('detachAllOut');
-  },
-  close: function(){
-    this.$super();
-    this.emit('close',this);
-    this.detachAll();
-  },
-  },{
-    Blueprint: function(id,fx){
-      stacks.Asserted(stacks.valids.String(id),'first argument must be a stringed');
-      stacks.Asserted(stacks.valids.Function(fx),'second argument must be a function');
-      var print =  stacks.funcs.curry(Print.make,id,fx);
-      print.path = [id];
-      print.id = id;
-      print.Imprint = stacks.funcs.bind(function(plug){
-        if(!Print.instanceBelongs(plug)) return;
-        var res = fx.call(plug);
-        return stacks.valids.exists(res) ? res : plug;
-      },print);
-      print.Blueprint = stacks.funcs.bind(function(id,fn){
-        stacks.Asserted(stacks.valids.String(id),'first argument be a stringed "id" for the plug');
-        var f = Print.Blueprint(id,function(){
-          if(stacks.valids.Function(fx)) fx.call(this);
-          if(stacks.valids.Function(fn)) fn.call(this);
-        });
-        f.path.push(id);
-        return f;
-      });
-      return print;
-    },
-}).muxin({
-  ai: function(plug,chan,xchan){
-    if(!Print.instanceBelongs(plug)) return;
-    if(stacks.valids.String(chan) && !plug.hasIn(chan)) return;
-    if(stacks.valids.String(xchan) && !this.hasIn(xchan)) return;
-    var xc = this.in(xchan);
-    var cc = plug.in(chan);
-    this.connects.add(xchan||'in',plug,chan||'in');
-    xc.bindOut(cc);
-  },
-  di: function(plug,chan,xchan){
-    if(!Print.instanceBelongs(plug)) return;
-    if(stacks.valids.String(chan) && !plug.hasIn(chan)) return;
-    if(stacks.valids.String(xchan) && !this.hasIn(xchan)) return;
-    var xc = this.in(xchan);
-    var cc = plug.in(chan);
-    this.connects.remove(xchan||'in',plug,chan||'in');
-    xc.unbind(cc);
-  },
-  ao: function(plug,chan,xchan){
-    if(!Print.instanceBelongs(plug)) return;
-    if(stacks.valids.String(chan) && !plug.hasOut(chan)) return;
-    if(stacks.valids.String(xchan) && !this.hasOut(xchan)) return;
-    var xc = this.out(xchan);
-    var cc = plug.out(chan);
-    this.connects.add(xchan||'out',plug,chan||'out');
-    xc.bindOut(cc);
-  },
-  do: function(plug,chan,xchan){
-    if(!Print.instanceBelongs(plug)) return;
-    if(stacks.valids.String(chan) && !plug.hasOut(chan)) return;
-    if(stacks.valids.String(xchan) && !this.hasOut(xchan)) return;
-    var xc = this.out(xchan);
-    var cc = plug.out(chan);
-    this.connects.remove(xchan||'out',plug,chan||'out');
-    xc.unbind(cc);
-  },
-  a: function(plug,chan,xchan){
-    if(!Print.instanceBelongs(plug)) return;
-    if(stacks.valids.String(chan) && !plug.hasIn(chan)) return;
-    if(stacks.valids.String(xchan) && !this.hasOut(xchan)) return;
-    var xc = this.out(xchan);
-    var cc = plug.in(chan);
-    this.connects.add(xchan||'out',plug,chan||'in');
-    xc.bindOut(cc);
-  },
-  d: function(plug,chan,xchan){
-    if(!Print.instanceBelongs(plug)) return;
-    if(stacks.valids.String(chan) && !plug.hasIn(chan)) return;
-    if(stacks.valids.String(xchan) && !this.hasOut(xchan)) return;
-    var xc = this.out(xchan);
-    var cc = plug.in(chan);
-    this.connects.remove(xchan||'out',plug,chan||'in');
-    xc.unbind(cc);
-  },
-});
-
-var Blueprint = exports.Blueprint = stacks.funcs.bind(Print.Blueprint,Print);
-
-var Atomic = exports.Atomic = Blueprint('Atomic',function(){
-  this.enableFiltering();
-});
-
-},{"stackq":8}],4:[function(require,module,exports){
+},{"./domain.js":1,"./shims.js":8,"stackq":7}],3:[function(require,module,exports){
 module.exports = (function(core){
 
 
@@ -1840,7 +1755,7 @@ return asc;
 
 });
 
-},{}],5:[function(require,module,exports){
+},{}],4:[function(require,module,exports){
 (function (process){
 module.exports = (function(core){
 
@@ -1853,11 +1768,6 @@ module.exports = (function(core){
       var res = fn.apply(scope,arguments);
       return res ? res : (scope || this);
     };
-  };
-
-  AppStack.noConflict = function(){
-      root.AppStack = previousAppStack;
-      return this;
   };
 
   AppStack.Counter = function(){
@@ -1883,7 +1793,6 @@ module.exports = (function(core){
   }
 
   AppStack.Util = {
-
       //meta_data
       name:"AppStack.Util",
       description: "a set of common,well used functions for the everyday developer,with cross-browser shims",
@@ -1982,8 +1891,6 @@ module.exports = (function(core){
             }
           });
         }
-
-
       },
 
       nextIterator: function(obj,callback,complete,scope,conf){
@@ -2455,15 +2362,6 @@ module.exports = (function(core){
         }
       },
 
-      chain: function(o){
-        if(!this.isObject(o)) return;
-        var self = this,orig = o, chained = { implode: function(){ self.explode(this); } };
-        this.forEach(o,function(e,i,o){
-          if(this.has(orig,i) && this.isFunction(e) && !(i === 'implode')) chained[i] = function(){ orig[i].apply(orig,arguments); return chained; }
-        },null,this);
-        return chained;
-      },
-
       //takes a single supplied value and turns it into an array,if its an
       //object returns an array containing two subarrays of keys and values in
       //the return array,if a single variable,simple wraps it in an array,
@@ -2585,7 +2483,6 @@ module.exports = (function(core){
         },indent);
       },
 
-
       hasGetProperty: function(obj,name){
         return this.isValid(obj.__lookupGetter__(name));
       },
@@ -2690,974 +2587,541 @@ module.exports = (function(core){
         if(this.isString(a)){ a = this.values(a); b = this.values(b); }
 
         this.forEach(a,function(e,i,o){
-            if(withKey === false && this.contains(b,e)) this.push(out,e,i);
-            if(this.hasOwn(b,i,e)) this.push(out,e,i);
-            return;
-        },null,this);
+              if(withKey === false && this.contains(b,e)) this.push(out,e,i);
+              if(this.hasOwn(b,i,e)) this.push(out,e,i);
+              return;
+          },null,this);
 
-        if(this.isString(a)) return this.normalizeArray(out).join('');
-        if(this.isArray(a)) return this.normalizeArray(out);
-        return out;
-      },
+          if(this.isString(a)) return this.normalizeArray(out).join('');
+          if(this.isArray(a)) return this.normalizeArray(out);
+          return out;
+        },
 
-      disjoint: function(a,b,withKey){
-        var out = this.matchReturnType(a,b);
+        disjoint: function(a,b,withKey){
+          var out = this.matchReturnType(a,b);
 
-        if(this.isString(a)){ a = this.values(a); b = this.values(b); }
+          if(this.isString(a)){ a = this.values(a); b = this.values(b); }
 
-        this.forEach(a,function(e,i,o){
-            if(withKey === false && !this.contains(b,e)) this.push(out,e,i);
-            if(!this.hasOwn(b,i,e)) this.push(out,e,i);
-            return;
-        },null,this);
+          this.forEach(a,function(e,i,o){
+              if(withKey === false && !this.contains(b,e)) this.push(out,e,i);
+              if(!this.hasOwn(b,i,e)) this.push(out,e,i);
+              return;
+          },null,this);
 
-        this.forEach(b,function(e,i,o){
-            if(withKey === false && !this.contains(a,e)) this.push(out,e,i);
-            if(!this.hasOwn(a,i,e)) this.push(out,e,i);
-            return;
-        },null,this);
+          this.forEach(b,function(e,i,o){
+              if(withKey === false && !this.contains(a,e)) this.push(out,e,i);
+              if(!this.hasOwn(a,i,e)) this.push(out,e,i);
+              return;
+          },null,this);
 
-        if(this.isString(a)) return this.normalizeArray(out).join('');
-        if(this.isArray(a)) return this.normalizeArray(out);
-        return out;
-      },
+          if(this.isString(a)) return this.normalizeArray(out).join('');
+          if(this.isArray(a)) return this.normalizeArray(out);
+          return out;
+        },
 
-      _anyArray: function(o,value,fn){
-           for(var i=0,len = o.length; i < len; i++){
-            if(value === o[i]){
+        _anyArray: function(o,value,fn){
+             for(var i=0,len = o.length; i < len; i++){
+              if(value === o[i]){
+               if(fn) fn.call(this,o[i],i,o);
+               return true;
+               break;
+             }
+           }
+           return false;
+        },
+
+        _anyObject: function(o,value,fn){
+           for(var i in o){
+            if(value === i){
              if(fn) fn.call(this,o[i],i,o);
              return true;
              break;
            }
          }
          return false;
-      },
+        },
 
-      _anyObject: function(o,value,fn){
-         for(var i in o){
-          if(value === i){
-           if(fn) fn.call(this,o[i],i,o);
-           return true;
-           break;
-         }
-       }
-       return false;
-      },
+          //mainly works wth arrays only
+          //flattens an array that contains multiple arrays into a single array
+        flatten: function(arrays,result){
+           var self = this,flat = result || [];
+           this.forEach(arrays,function(a){
 
-        //mainly works wth arrays only
-        //flattens an array that contains multiple arrays into a single array
-      flatten: function(arrays,result){
-         var self = this,flat = result || [];
-         this.forEach(arrays,function(a){
+            if(self.isArray(a)){
+             self.flatten(a,flat);
+           }else{
+             flat.push(a);
+           }
 
-          if(self.isArray(a)){
-           self.flatten(a,flat);
-         }else{
-           flat.push(a);
-         }
+         },null,self);
 
-       },null,self);
+           return flat;
+        },
 
-         return flat;
-      },
-
-      filter: function(obj,fn,completer,scope,conf){
-         if(!obj || !fn) return false;
-         var result=[],scope = scope || this;
-         conf = conf || {};
-         this.forEach(obj,function filter_mover(e,i,b){
-           if(fn.call(scope,e,i,b)){
-              if(!!conf['allow'] || e) result.push(e);
-              //result.push(e);
-          }
-        },completer,scope,conf);
-         return result;
-      },
-
-      //returns an array of occurences index of a particular value
-      occurs: function(o,value){
-         var occurence = [];
-         this.forEach(o,function occurmover(e,i,b){
-           if(e === value){ occurence.push(i); }
-         },null,this);
-         return occurence;
-      },
-
-      //performs an operation on every item that has a particular value in the object
-      every: function(o,value,fn){
-         this.forEach(o,function everymover(e,i,b){
-           if(e === value){
-            if(fn) fn.call(this,e,i,b);
-          }
-        },null,this);
-         return;
-      },
-
-      delay: function(fn,duration){
-         var args = this.makeSplice(arguments,2);
-         return setTimeout(function(){
-          fn.apply(this,args)
-        },duration);
-      },
-
-      nextTick: function(fn){
-          if(typeof process !== 'undefined' || !(process.nextTick)){
-            return process.nextTick(fn);
-          }
-          return setTimeout(fn,0);
-      },
-
-      rshift: function(o){
-            if(!this.isArray(o) || o.length <= 0) return;
-            var ind = o.length - 1;
-            var data =  o[ind];
-            delete o[ind];
-            o.length = ind;
-            return data;
-      },
-
-      shift: function(o){
-            if(!this.isArray(o) || o.length <= 0) return;
-            var data =  o[0];
-            delete o[0];
-            this.normalizeArray(o);
-            return data;
-      },
-
-      unshift: function(o,item){
-            if(!this.isArray(o)) return;
-            var temp,i = o.length;
-            for(; i > 0; i--){
-              o[i] = o[i-1];
+        filter: function(obj,fn,completer,scope,conf){
+           if(!obj || !fn) return false;
+           var result=[],scope = scope || this;
+           conf = conf || {};
+           this.forEach(obj,function filter_mover(e,i,b){
+             if(fn.call(scope,e,i,b)){
+                if(!!conf['allow'] || e) result.push(e);
+                //result.push(e);
             }
+          },completer,scope,conf);
+           return result;
+        },
 
-            o[0] = item;
-            return o;
-      },
+        //returns an array of occurences index of a particular value
+        occurs: function(o,value){
+           var occurence = [];
+           this.forEach(o,function occurmover(e,i,b){
+             if(e === value){ occurence.push(i); }
+           },null,this);
+           return occurence;
+        },
 
-      explode: function(){
-             if(arguments.length == 1){
-              if(this.isArray(arguments[0])) this._explodeArray(arguments[0]);
-              if(this.matchType(arguments[0],"object")) this._explodeObject(arguments[0]);
+        //performs an operation on every item that has a particular value in the object
+        every: function(o,value,fn){
+           this.forEach(o,function everymover(e,i,b){
+             if(e === value){
+              if(fn) fn.call(this,e,i,b);
             }
-            if(arguments.length > 1){
-              this.forEach(arguments,function(e,i,b){
-               if(this.isArray(e)) this._explodeArray(e);
-               if(this.matchType(e,"object")) this._explodeObject(e);
+          },null,this);
+           return;
+        },
+
+        delay: function(fn,duration){
+           var args = this.makeSplice(arguments,2);
+           return setTimeout(function(){
+            fn.apply(this,args)
+          },duration);
+        },
+
+        nextTick: function(fn){
+            if(typeof process !== 'undefined' || !(process.nextTick)){
+              return process.nextTick(fn);
+            }
+            return setTimeout(fn,0);
+        },
+
+        rshift: function(o){
+              if(!this.isArray(o) || o.length <= 0) return;
+              var ind = o.length - 1;
+              var data =  o[ind];
+              delete o[ind];
+              o.length = ind;
+              return data;
+        },
+
+        shift: function(o){
+              if(!this.isArray(o) || o.length <= 0) return;
+              var data =  o[0];
+              delete o[0];
+              this.normalizeArray(o);
+              return data;
+        },
+
+        unshift: function(o,item){
+              if(!this.isArray(o)) return;
+              var temp,i = o.length;
+              for(; i > 0; i--){
+                o[i] = o[i-1];
+              }
+
+              o[0] = item;
+              return o;
+        },
+
+        explode: function(){
+               if(arguments.length == 1){
+                if(this.isArray(arguments[0])) this._explodeArray(arguments[0]);
+                if(this.matchType(arguments[0],"object")) this._explodeObject(arguments[0]);
+              }
+              if(arguments.length > 1){
+                this.forEach(arguments,function(e,i,b){
+                 if(this.isArray(e)) this._explodeArray(e);
+                 if(this.matchType(e,"object")) this._explodeObject(e);
+               },null,this);
+              }
+        },
+
+        _explodeArray: function(o,force){
+             if(this.isArray(o)){
+              this.forEach(o,function exlodearray_each(e,i,b){
+               delete b[i];
              },null,this);
-            }
-      },
+              o.length = 0;
+            };
 
-      _explodeArray: function(o,force){
-           if(this.isArray(o)){
-            this.forEach(o,function exlodearray_each(e,i,b){
+            return o;
+        },
+
+        _explodeObject: function(o){
+           if(this.matchType(o,"object")){
+            this.forEach(o, function exploder_each(e,i,b){
              delete b[i];
            },null,this);
-            o.length = 0;
-          };
+            if(o.length) o.length = 0;
+          }
 
           return o;
-      },
+        },
 
-      _explodeObject: function(o){
-         if(this.matchType(o,"object")){
-          this.forEach(o, function exploder_each(e,i,b){
-           delete b[i];
-         },null,this);
-          if(o.length) o.length = 0;
-        }
-
-        return o;
-      },
-
-      is: function(prop,value){
-         return (prop === value) ? true : false;
-      },
+        is: function(prop,value){
+           return (prop === value) ? true : false;
+        },
 
 
-      eString : function(string){
-        var a = (string),p = a.constructor.prototype;
-        p.end = function(value){
-          var k = this.length - 1;
-          if(value){ this[k] = value; return this; }
-          return this[k];
-        };
-        p.start = function(value){
-          var k = 0;
-          if(value){ this[k] = value; return this; }
-          return this[0];
-        };
+        eString : function(string){
+          var a = (string),p = a.constructor.prototype;
+          p.end = function(value){
+            var k = this.length - 1;
+            if(value){ this[k] = value; return this; }
+            return this[k];
+          };
+          p.start = function(value){
+            var k = 0;
+            if(value){ this[k] = value; return this; }
+            return this[0];
+          };
 
-        return a;
-      },
+          return a;
+        },
 
+        //you can deep clone a object into another object that doesnt have any
+        //refernce to any of the values of the old one,incase u dont want to
+        //initialize a vairable for the to simple pass a {} or [] to the to arguments
+        //it will be returned once finished eg var b = clone(a,{}); or b=clone(a,[]);
+        clone: function(from,tto,noDeep){
+              if(!this.isArray(from) && !this.isObject(from)) return from;
+              var to = null;
+              var self = this;
+              if(tto) to = tto;
+              else if(this.isArray(from)) to = [];
+              else if(this.isObject(from)) to = {};
 
-      //you can deep clone a object into another object that doesnt have any
-      //refernce to any of the values of the old one,incase u dont want to
-      //initialize a vairable for the to simple pass a {} or [] to the to arguments
-      //it will be returned once finished eg var b = clone(a,{}); or b=clone(a,[]);
-      clone: function(from,tto,noDeep){
-            if(!this.isArray(from) && !this.isObject(from)) return from;
-            var to = null;
-            var self = this;
-            if(tto) to = tto;
-            else if(this.isArray(from)) to = [];
-            else if(this.isObject(from)) to = {};
+              this.forEach(from,function cloner(e,i,b){
+                if(!noDeep){
+                 if(self.isArray(e)){
+                   to[i] = self.clone(e,[]);
+                   return;
+                 }
+                 if(this.isObject(e)){
+                   to[i] = self.clone(e,{});
+                   return;
+                 }
+                }
 
-            this.forEach(from,function cloner(e,i,b){
-              if(!noDeep){
-               if(self.isArray(e)){
-                 to[i] = self.clone(e,[]);
-                 return;
-               }
-               if(this.isObject(e)){
-                 to[i] = self.clone(e,{});
-                 return;
-               }
-              }
+               to[i] = e;
+             },null,this);
+            return to;
+        },
 
-             to[i] = e;
-           },null,this);
-          return to;
-      },
+        isType: function(o){
+              return ({}).toString.call(o).match(/\s([\w]+)/)[1].toLowerCase();
+        },
 
-      isType: function(o){
-            return ({}).toString.call(o).match(/\s([\w]+)/)[1].toLowerCase();
-      },
+        matchType: function(obj,type){
+              return ({}).toString.call(obj).match(/\s([\w]+)/)[1].toLowerCase() === type.toLowerCase();
+        },
 
-      matchType: function(obj,type){
-            return ({}).toString.call(obj).match(/\s([\w]+)/)[1].toLowerCase() === type.toLowerCase();
-      },
+        isRegExp: function(expr){
+             return this.matchType(expr,"regexp");
+        },
 
-      isRegExp: function(expr){
-           return this.matchType(expr,"regexp");
-      },
+        isString: function(o){
+           return this.matchType(o,"string");
+        },
 
-      isString: function(o){
-         return this.matchType(o,"string");
-      },
+        isObject: function(o){
+           return this.matchType(o,"object");
+        },
 
-      isObject: function(o){
-         return this.matchType(o,"object");
-      },
+        isArray: function(o){
+           return this.matchType(o,"array");
+         },
 
-      isArray: function(o){
-         return this.matchType(o,"array");
-       },
+        isDate: function(o){
+          return this.matchType(o,"date");
+        },
 
-      isDate: function(o){
-        return this.matchType(o,"date");
-      },
+        isFunction: function(o){
+           return (this.matchType(o,"function") && (typeof o == "function"));
+         },
 
-      isFunction: function(o){
-         return (this.matchType(o,"function") && (typeof o == "function"));
-       },
+        isPrimitive: function(o){
+           if(!this.isObject(o) && !this.isFunction(o) && !this.isArray(o) && !this.isUndefined(o) && !this.isNull(o)) return true;
+           return false;
+        },
 
-      isPrimitive: function(o){
-         if(!this.isObject(o) && !this.isFunction(o) && !this.isArray(o) && !this.isUndefined(o) && !this.isNull(o)) return true;
-         return false;
-      },
+        isUndefined: function(o){
+           return (o === undefined && (typeof o === 'undefined') && this.matchType(o,'undefined'));
+        },
 
-      isUndefined: function(o){
-         return (o === undefined && (typeof o === 'undefined') && this.matchType(o,'undefined'));
-      },
+        isNull: function(o){
+           return (o === null && this.matchType(o,'null'));
+        },
 
-      // isCircular: function(o){
-      //    return (o === null && this.matchType(o,'circular'));
-      // },
+        isValid: function(o){
+          return (!this.isNull(o) && !this.isUndefined(o) && !this.isEmpty(o));
+        },
 
-      isNull: function(o){
-         return (o === null && this.matchType(o,'null'));
-      },
+        isNumber: function(o){
+           return this.matchType(o,"number") && o !== Infinity;
+        },
 
-      isValid: function(o){
-        return (!this.isNull(o) && !this.isUndefined(o) && !this.isEmpty(o));
-      },
+        isInfinity: function(o){
+           return this.matchType(o,"number") && o === Infinity;
+         },
 
-      isNumber: function(o){
-         return this.matchType(o,"number") && o !== Infinity;
-      },
+        isArgument: function(o){
+           return this.matchType(o,"arguments");
+        },
 
-      isInfinity: function(o){
-         return this.matchType(o,"number") && o === Infinity;
-       },
+        isFalse: function(o){
+          return (o === false);
+        },
 
-      isArgument: function(o){
-         return this.matchType(o,"arguments");
-      },
+        isTrue: function(o){
+          return (o === true);
+        },
 
-      isFalse: function(o){
-        return (o === false);
-      },
+        isBoolean: function(o){
+          return this.matchType(o,"boolean");
+        },
 
-      isTrue: function(o){
-        return (o === true);
-      },
+        has: function(obj,elem,value,fn){
+         var self = this,state = false;
 
-      isBoolean: function(o){
-        return this.matchType(o,"boolean");
-      },
-
-      has: function(obj,elem,value,fn){
-       var self = this,state = false;
-
-       this.any(obj,elem,function __has(e,i){
-        if(value){
-         if(e === value){
-          state = true;
-          if(fn && self.isFunction(fn)) fn.call(e,i,obj);
+         this.any(obj,elem,function __has(e,i){
+          if(value){
+           if(e === value){
+            state = true;
+            if(fn && self.isFunction(fn)) fn.call(e,i,obj);
+            return;
+          }
+          state = false;
           return;
-        }
-        state = false;
-        return;
-       }
+         }
 
-       state = true;
-       if(fn && self.isFunction(fn)) fn.call(e,i,obj);
-      });
-
-       return state;
-      },
-
-      hasOwn: function(obj,elem,value){
-
-         if(Object.hasOwnProperty){
-                if(!value) return Object.hasOwnProperty.call(obj,elem);
-                else return (Object.hasOwnProperty.call(obj,elem) && obj[elem] === value);
-          }
-
-          var keys,constroKeys,protoKeys,state = false,fn = function own(e,i){
-            if(value){
-             state = (e === value) ? true : false;
-             return;
-           }
-           state = true;
-         };
-
-         if(!this.isFunction(obj)){
-            /* when dealing pure instance objects(already instantiated
-             * functions when the new keyword was used,all object literals
-             * we only will be checking the object itself since its points to
-             * its prototype against its constructors.prototype
-             * constroKeys = this.keys(obj.constructor);
-             */
-
-             keys = this.keys(obj);
-            //ensures we are not dealing with same object re-referening,if
-            //so,switch to constructor.constructor call to get real parent
-            protoKeys = this.keys(
-             ((obj === obj.constructor.prototype) ? obj.constructor.constructor.prototype : obj.constructor.prototype)
-             );
-
-            if(this.any(keys,elem,(value ? fn : null)) && !this.any(protoKeys,elem,(value ? fn : null)))
-              return state;
-          }
-
-         /* when dealing with functions we are only going to be checking the
-         * object itself vs the objects.constructor ,where the
-         * objects.constructor points to its parent if there was any
-         */
-         //protoKeys = this.keys(obj.prototype);
-         keys = this.keys(obj);
-         constroKeys = this.keys(obj.constructor);
-
-         if(this.any(keys,elem,(value ? fn : null)) && !this.any(constroKeys,elem,(value ? fn : null)))
-           return state;
-      },
-
-      proxy: function(fn,scope){
-        return function(){
-          return fn.apply(scope,arguments);
-        };
-      },
-
-      //allows you to do mass assignment into an array or array-like object
-      //({}),the first argument is the object to insert into and the rest are
-      //the values to be inserted
-      pusher: function(){
-           var slice = [].splice.call(arguments,0),
-           focus = slice[0],rem  = slice.splice(1,slice.length);
-
-           this.forEach(rem,function pushing(e,i,b){
-            _pusher.call(focus,e);
-          });
-           return;
-      },
-
-      keys: function(o){
-        if(typeof Object.keys === 'function') return Object.keys(o);
-        var keys = [];
-        for(var i in o){
-           keys.push(i);
-        }
-        return keys;
-      },
-
-      values: function(o){
-        if(this.isArray(o) || this.isString(o))
-          return Array.prototype.slice.call(o,0,o.length);
-        var vals = [];
-        for(var i in o){
-           vals.push(o[i]);
-        }
-        return vals;
-      },
-
-        //normalizes an array,ensures theres no undefined or empty spaces between arrays
-      normalizeArray: function(a){
-              if(!a || !this.isArray(a)) return;
-
-              var i = 0,start = 0,len = a.length;
-
-              for(;i < len; i++){
-               if(!this.isUndefined(a[i]) && !this.isNull(a[i]) && !(this.isEmpty(a[i]))){
-                a[start]=a[i];
-                start += 1;
-              }
-            }
-
-            a.length = start;
-            return a;
-      },
-
-      ns : function(space,fn,scope){
-         var obj = scope || {},
-            space = space.split('.'),
-            len = space.length,
-            pos = len - 1,
-            index = 0,
-            current = obj;
-
-         this.forEach(space,function(e,i){
-             if(!current[e]) current[e] = {};
-             current[e].parent = current;
-             current = current[e];
-             if(i === pos){
-              current.parent[e] = fn;
-             }
-         },null,this);
-
-         // obj = obj[space[0]];
-         delete obj.parent;
-         return obj;
-      },
-
-      reduce: function(obj,fn,scope){
-        var final = 0;
-        this.forEach(obj,function(e,i,o){
-          final = fn.call(scope,e,i,o,final)
-        },null,scope);
-
-        return final;
-      },
-
-      joinEqualArrays: function(arr1,arr2){
-          if(arr1.length !== arr2.length) return false;
-          var f1 = arr1.join(''), f2 = arr2.join('');
-          if(f1 === f2) return true;
-          return false;
-      },
-
-      sumEqualArrays: function(arr1,arr2){
-          if(arr1.length !== arr2.length) return false;
-          var math = function(e,i,o,prev){
-            return (e + prev);
-          },f1,f2;
-
-          f1 = this.reduce(arr1,math); f2 = this.reduce(arr2,math);
-          if(f1 === f2) return true;
-          return false;
-      },
-
-      matchObjects: function(a,b){
-        if(JSON.stringify(a) === JSON.stringify(b)) return true;
-        return false;
-      },
-
-      objectify: function(obj,split,kvseperator){
-        var self = this,u = {},split = obj.split(split);
-        this.forEach(split,function(e,i,o){
-            if(self.isArray(e)){
-              u[i] = self.objectify(e.join(split),split,kvseperator);
-              return;
-            }
-            if(self.isObject(e)) return u[i] = e;
-
-            var point = e.split(kvseperator);
-            u[point[0]] = point[1];
+         state = true;
+         if(fn && self.isFunction(fn)) fn.call(e,i,obj);
         });
-        return u;
-      },
 
+         return state;
+        },
 
+        hasOwn: function(obj,elem,value){
+
+           if(Object.hasOwnProperty){
+                  if(!value) return Object.hasOwnProperty.call(obj,elem);
+                  else return (Object.hasOwnProperty.call(obj,elem) && obj[elem] === value);
+            }
+
+            var keys,constroKeys,protoKeys,state = false,fn = function own(e,i){
+              if(value){
+               state = (e === value) ? true : false;
+               return;
+             }
+             state = true;
+           };
+
+           if(!this.isFunction(obj)){
+              /* when dealing pure instance objects(already instantiated
+               * functions when the new keyword was used,all object literals
+               * we only will be checking the object itself since its points to
+               * its prototype against its constructors.prototype
+               * constroKeys = this.keys(obj.constructor);
+               */
+
+               keys = this.keys(obj);
+              //ensures we are not dealing with same object re-referening,if
+              //so,switch to constructor.constructor call to get real parent
+              protoKeys = this.keys(
+               ((obj === obj.constructor.prototype) ? obj.constructor.constructor.prototype : obj.constructor.prototype)
+               );
+
+              if(this.any(keys,elem,(value ? fn : null)) && !this.any(protoKeys,elem,(value ? fn : null)))
+                return state;
+            }
+
+           /* when dealing with functions we are only going to be checking the
+           * object itself vs the objects.constructor ,where the
+           * objects.constructor points to its parent if there was any
+           */
+           //protoKeys = this.keys(obj.prototype);
+           keys = this.keys(obj);
+           constroKeys = this.keys(obj.constructor);
+
+           if(this.any(keys,elem,(value ? fn : null)) && !this.any(constroKeys,elem,(value ? fn : null)))
+             return state;
+        },
+
+        proxy: function(fn,scope){
+          return function(){
+            return fn.apply(scope,arguments);
+          };
+        },
+
+        //allows you to do mass assignment into an array or array-like object
+        //({}),the first argument is the object to insert into and the rest are
+        //the values to be inserted
+        pusher: function(){
+             var slice = [].splice.call(arguments,0),
+             focus = slice[0],rem  = slice.splice(1,slice.length);
+
+             this.forEach(rem,function pushing(e,i,b){
+              _pusher.call(focus,e);
+            });
+             return;
+        },
+
+        keys: function(o){
+          if(typeof Object.keys === 'function') return Object.keys(o);
+          var keys = [];
+          for(var i in o){
+             keys.push(i);
+          }
+          return keys;
+        },
+
+        values: function(o){
+          if(this.isArray(o) || this.isString(o))
+            return Array.prototype.slice.call(o,0,o.length);
+          var vals = [];
+          for(var i in o){
+             vals.push(o[i]);
+          }
+          return vals;
+        },
+
+          //normalizes an array,ensures theres no undefined or empty spaces between arrays
+        normalizeArray: function(a){
+                if(!a || !this.isArray(a)) return;
+
+                var i = 0,start = 0,len = a.length;
+
+                for(;i < len; i++){
+                 if(!this.isUndefined(a[i]) && !this.isNull(a[i]) && !(this.isEmpty(a[i]))){
+                  a[start]=a[i];
+                  start += 1;
+                }
+              }
+
+              a.length = start;
+              return a;
+        },
+
+        reduce: function(obj,fn,scope){
+          var final = 0;
+          this.forEach(obj,function(e,i,o){
+            final = fn.call(scope,e,i,o,final)
+          },null,scope);
+
+          return final;
+        },
+
+        joinEqualArrays: function(arr1,arr2){
+            if(arr1.length !== arr2.length) return false;
+            var f1 = arr1.join(''), f2 = arr2.join('');
+            if(f1 === f2) return true;
+            return false;
+        },
+
+        sumEqualArrays: function(arr1,arr2){
+            if(arr1.length !== arr2.length) return false;
+            var math = function(e,i,o,prev){
+              return (e + prev);
+            },f1,f2;
+
+            f1 = this.reduce(arr1,math); f2 = this.reduce(arr2,math);
+            if(f1 === f2) return true;
+            return false;
+        },
+
+        matchObjects: function(a,b){
+          if(JSON.stringify(a) === JSON.stringify(b)) return true;
+          return false;
+        },
+
+        objectify: function(obj,split,kvseperator){
+          var self = this,u = {},split = obj.split(split);
+          this.forEach(split,function(e,i,o){
+              if(self.isArray(e)){
+                u[i] = self.objectify(e.join(split),split,kvseperator);
+                return;
+              }
+              if(self.isObject(e)) return u[i] = e;
+
+              var point = e.split(kvseperator);
+              u[point[0]] = point[1];
+          });
+          return u;
+        },
   };
 
   AppStack.Util.String = AppStack.Util.makeString;
   AppStack.Util.bind = AppStack.Util.proxy;
   AppStack.Util.each = AppStack.Util.iterator;
 
-  // AppStack.Callbacks = (function(SU){
-  //
-  //          var flagsCache = {},
-  //             su = SU,
-  //             makeFlags = function(flags){
-  //                if(!flags || su.isEmpty(flags)) return;
-  //                if(flagsCache[flags]) return flagsCache[flags];
-  //
-  //                var object = flagsCache[flags] = {};
-  //                su.forEach(flags.split(/\s+/),function(e){
-  //                      object[e] = true;
-  //                });
-  //
-  //                return object;
-  //             },
-  //             callbackTemplate = function(fn,context,subscriber){
-  //                return {
-  //                   fn:fn,
-  //                   context: context || null,
-  //                   subscriber: subscriber || null
-  //                }
-  //             },
-  //             occursObjArray = function(arr,elem,value,fn){
-  //                var oc = [];
-  //                su.forEach(arr,function(e,i,b){
-  //                   if(e){
-  //                      if((elem in e) && (e[elem] === value)){
-  //                        oc.push(i);
-  //                        if(fn && su.isFunction(fn)) fn.call(null,e,i,arr);
-  //                      }
-  //                   }
-  //                },null,this);
-  //
-  //                return oc;
-  //
-  //             },
-  //            callback = function(fl){
-  //                 var  list = [],
-  //                      fired = false,
-  //                      firing = false,
-  //                      fired = false,
-  //                      fireIndex = 0,
-  //                      fireStart = 0,
-  //                      fireLength = 0,
-  //                      flags = makeFlags(fl) || {},
-  //
-  //                      _fixList = function(){
-  //                         if(!firing){
-  //                            su.normalizeArray(list);
-  //                         }
-  //                      },
-  //                      _add = function(args){
-  //                         su.forEach(args,function(e,i){
-  //                            if(su.isArray(e)) _add(e);
-  //                            if(su.isObject(e)){
-  //                               if(!e.fn || (e.fn && !su.isFunction(e.fn))){ return;}
-  //                               if(!su.isNull(e.context) && !su.isUndefined(e.context) && !su.isObject(e.context)){ return; }
-  //                               if(flags.unique && instance.has('fn',e.fn)){ return; }
-  //                               list.push(e);
-  //                            }
-  //                         });
-  //                      },
-  //
-  //                      _fire = function(context,args){
-  //                         firing = true;
-  //                         fired = true;
-  //                         fireIndex = fireStart || 0;
-  //                         for(;fireIndex < fireLength; fireIndex++){
-  //                            if(!su.isUndefined(list[fireIndex]) && !su.isNull(list[fireIndex])){
-  //                               var e = list[fireIndex];
-  //                               if(!e || !e.fn) return;
-  //                               if(flags.forceContext){
-  //                                  e.fn.apply(context,args);
-  //                               }else{
-  //                                  e.fn.apply((e.context ? e.context : context),args);
-  //                               }
-  //                               if(flags.fireRemove) delete list[fireIndex];
-  //                            }
-  //                         }
-  //                         firing = false;
-  //
-  //                         // if(list){
-  //                         //    if(flags.once && fired){
-  //                         //       instance.disable();
-  //                         //    }
-  //                         // }else{
-  //                         //    list = [];
-  //                         // }
-  //
-  //                         return;
-  //                      },
-  //
-  //                      instance =  {
-  //                         size: function(){ return list ? list.length : -1; },
-  //
-  //                         add: function(){
-  //                            if(list){
-  //                               if(arguments.length === 1){
-  //                                  if(su.isArray(arguments[0])) _add(arguments[0]);
-  //                                  if(su.isObject(arguments[0])) _add([arguments[0]]);
-  //                                  if(su.isFunction(arguments[0])){
-  //                                     _add([
-  //                                           callbackTemplate(arguments[0],arguments[1],arguments[2])
-  //                                     ]);
-  //                                  }
-  //                               }else{
-  //                                  _add([
-  //                                        callbackTemplate(arguments[0],arguments[1],arguments[2])
-  //                                  ]);
-  //                               }
-  //
-  //                               fireLength = list.length;
-  //                            };
-  //                            return this;
-  //                         },
-  //
-  //                         fireWith: function(context,args){
-  //                            if(this.fired() && flags.once) return;
-  //
-  //                            if(!firing ){
-  //                               _fire(context,args);
-  //                            }
-  //                            return this;
-  //                         },
-  //
-  //                         fire: function(){
-  //                            var args = su.arranize(arguments);
-  //                            (function(_){
-  //                               _.fireWith(_,args);
-  //                            })(instance);
-  //                            return this;
-  //                         },
-  //
-  //                         remove: function(fn,context,subscriber){
-  //                            if(list){
-  //                               if(fn){
-  //                                  this.occurs('fn',fn,function(e,i,b){
-  //                                     if(context && subscriber && (e.subscriber === subscriber) && (e.context === context)){
-  //                                        delete b[i];
-  //                                        su.normalizeArray(b);
-  //                                        return;
-  //                                     }
-  //                                     if(context && (e.context === context)){
-  //                                        delete b[i];
-  //                                        su.normalizeArray(b);
-  //                                        return;
-  //                                     }
-  //                                     if(subscriber && (e.subscriber === subscriber)){
-  //                                        delete b[i];
-  //                                        su.normalizeArray(b);
-  //                                        return;
-  //                                     }
-  //
-  //                                     delete b[i];
-  //                                     su.normalizeArray(b);
-  //                                     return;
-  //                                  });
-  //                                  return this;
-  //                               }
-  //
-  //                               if(context){
-  //                                  this.occurs('context',context,function(e,i,b){
-  //                                     if(subscriber && (e.subscriber === subscriber)){
-  //                                        delete b[i];
-  //                                        su.normalizeArray(b);
-  //                                        return;
-  //                                     }
-  //
-  //                                     delete b[i];
-  //                                     su.normalizeArray(b);
-  //                                     return;
-  //
-  //                                  });
-  //                                  return this;
-  //                               }
-  //
-  //                               if(subscriber){
-  //                                  this.occurs('subscriber',subscriber,function(e,i,b){
-  //                                     if(context && (e.context === context)){
-  //                                        delete b[i];
-  //                                        su.normalizeArray(b);
-  //                                        return;
-  //                                     }
-  //
-  //                                     delete b[i];
-  //                                     su.normalizeArray(b);
-  //                                     return;
-  //                                  });
-  //                                  return this;
-  //                               }
-  //                            }
-  //
-  //                            return this;
-  //                         },
-  //
-  //                         flush: function(){
-  //                           //  su.explode(list);
-  //                            list.length = 0;
-  //                            return this;
-  //                         },
-  //
-  //                         disable: function(){
-  //                            list = undefined;
-  //                            return this;
-  //                         },
-  //
-  //                         disabled: function(){
-  //                            return !list;
-  //                         },
-  //
-  //                         has: function(elem,value){
-  //                           var i=0,len = list.length;
-  //                           for(; i < len; i++){
-  //                               if(su.has(list[i],elem,value)){
-  //                                     return true;
-  //                                     break;
-  //                               }
-  //                           }
-  //                               return false;
-  //                         },
-  //
-  //                         occurs: function(elem,value,fn){
-  //                            return occursObjArray.call(this,list,elem,value,fn);
-  //                         },
-  //
-  //                         fired: function(){
-  //                            return !!fired;
-  //                         }
-  //
-  //                      };
-  //
-  //                 return instance;
-  //          };
-  //
-  //          return {
-  //            create : callback,
-  //            name:"AppStack.Callbacks",
-  //            description: "Callback API with the pub-sub pattern implementation(the heart of Promise and Events)",
-  //            licenses:[ { type: "mit", url: "http://mths.be/mit" }],
-  //            author: "Alexander Adeniyi Ewetumo",
-  //            version: "0.3.0",
-  //          };
-  //
-  // })(AppStack.Util);
-
-  AppStack.Env =  {
-           name: "AppStack.Env",
-           version: "1.0.0",
-           description: "simple environment detection script",
-           licenses:[ { type: "mit", url: "http://mths.be/mit" }],
-           author: "Alexander Adeniyin Ewetumo",
-           detect: (function(){
-              var envs = {
-                 unop: function(){ return "unknown" },
-                 node: function(){ return "node" },
-                 headless: function(){ return "headless" },
-                 browser: function(){ return "browser" },
-                 rhino: function(){ return "rhino" },
-                 xpcom: function(){ return "XPCOMCore" },
-              };
-
-              //will check if we are in a browser,node or headless based system
-              if(typeof XPCOMCore !== "undefined"){
-                 return envs.xpcom;
-              }
-              else if(typeof window === "undefined" && typeof java !== 'undefined'){
-                 return envs.rhino;
-              }
-              else if(typeof window !== "undefined" && typeof window.document !== 'undefined'){
-                 return envs.browser;
-              }
-              else if(typeof module !== 'undefined' && typeof module.exports !== 'undefined'){
-                 return envs.node;
-              }else{
-                 return detect = envs.unop;
-              }
-           })()
-
-  };
-
-  // AppStack.Events = (function(AppStack){
-  //
-  //       var util = AppStack.Util;
-  //       return function(){
-  //
-  //           var e = {
-  //                name: "AppStack.Events",
-  //                version: "1.0.0",
-  //                description: "Publication-Subscription implementation using Callback API",
-  //                licenses:[ { type: "mit", url: "http://mths.be/mit" }],
-  //                author: "Alexander Adeniyin Ewetumo",
-  //
-  //               events:{},
-  //
-  //               get: function(es){
-  //                 return this.events[es];
-  //               },
-  //
-  //               sizeOf: function(es){
-  //                 if(this.events[es]) return this.events[es].size();
-  //                 return -1;
-  //               },
-  //
-  //               set: function(es,flag){
-  //                   if(!this.events) this.events = {};
-  //                   if(!this.events[es]){
-  //                     var flags = (flag && typeof flag === 'string') ? flag.concat(' unique') : "unique";
-  //                     return (this.events[es] = AppStack.Callbacks.create(flag));
-  //                   }
-  //                   return this.events[es];
-  //               },
-  //
-  //               unset: function(es){
-  //                   if(!this.events) this.events = {};
-  //                   if(!this.events[es]) return;
-  //                   var e = this.events[es];
-  //                   if(e) e.flush() && e.disable();
-  //                   delete this.events[es];
-  //                   return true;
-  //               },
-  //
-  //               once: function(es,callback,context,subscriber){
-  //                  if(!this.events) this.events = {};
-  //                   if(!es || !callback){ return; }
-  //
-  //                   var e = this.set(es,'fireRemove');
-  //                   e.add(callback,context,subscriber);
-  //
-  //                   return;
-  //               },
-  //
-  //               on:function(es,callback,context,subscriber){
-  //                  if(!this.events) this.events = {};
-  //                   if(!es || !callback){ return; }
-  //
-  //                   var e = this.set(es);
-  //                   e.add(callback,context,subscriber);
-  //
-  //                   return;
-  //                },
-  //
-  //               off: function(es,callback,context,subscriber){
-  //                   if(arguments.length  === 0){
-  //
-  //                      return this;
-  //                   };
-  //                   var self = this;
-  //                   if(es === 'all'){
-  //                     if(this.events == null) return;
-  //                     util.each(this.events,function(e,i,o){
-  //                       self.unset(i);
-  //                     });
-  //                     return;
-  //                   }
-  //
-  //                   var e = this.events[es];
-  //                   if(!e) return;
-  //
-  //                   if(!callback && !context && !subscriber){ e.flush(); return this; }
-  //
-  //                   e.remove(callback,context,subscriber);
-  //                   return this;
-  //
-  //                },
-  //
-  //               emit: function(event){
-  //                  if(!event || !this.events){ return this; }
-  //
-  //                  var args = ([].splice.call(arguments,1)),
-  //                      e = this.events[event];
-  //
-  //                  if(!e) return this;
-  //
-  //                   e.fire.apply(null,args);
-  //
-  //                  return this;
-  //               },
-  //
-  //               flush: function(event){
-  //                  if(!event || !this.events){ return this; }
-  //
-  //                  var e = this.events[event];
-  //                  if(e) e.flush();
-  //                  return this;
-  //               },
-  //
-  //               flushAll: function(){
-  //                 util.each(this.events,function(e){ e.flush(); });
-  //                 return this;
-  //               }
-  //
-  //           };
-  //
-  //           //compatibility sake
-  //           e.removeListener = e.off;
-  //           e.removeAllListeners = function(){ return this.off('all'); };
-  //
-  //           return e;
-  //       };
-  //
-  // })(AppStack);
-
   AppStack.HashHelpers = function Helpers(scope){
-
-    var util =  AppStack.Util,
-    validatorDefault = function(){ return true; },
-    HashMaps = {
-      target: scope,
-      clone: function(){
-        return util.clone(this.target);
-      },
-      cascade: function(fn){
-        util.each(this.target,function(e,i,o){
-           return fn(e,i,o);
-        });
-      },
-      fetch: function(key){
-        return HashMaps.target[key];
-      },
-      exists: function(key,value){
-        if(!(key in HashMaps.target)) return false;
-        if(!util.isUndefined(value) && !util.isNull(value)) return (HashMaps.target[key] === value)
-        return true;
-      },
-      hasVal: function(fn){
-        for(var m in HashMaps.target){
-          if(fn(HashMaps.target[m])){
-            return m;
-            break;
+      var util =  AppStack.Util,
+      validatorDefault = function(){ return true; },
+      HashMaps = {
+        target: scope,
+        clone: function(){
+          return util.clone(this.target);
+        },
+        cascade: function(fn){
+          util.each(this.target,function(e,i,o){
+             return fn(e,i,o);
+          });
+        },
+        fetch: function(key){
+          return HashMaps.target[key];
+        },
+        exists: function(key,value){
+          if(!(key in HashMaps.target)) return false;
+          if(!util.isUndefined(value) && !util.isNull(value)) return (HashMaps.target[key] === value)
+          return true;
+        },
+        hasVal: function(fn){
+          for(var m in HashMaps.target){
+            if(fn(HashMaps.target[m])){
+              return m;
+              break;
+            }
           }
+          return false;
+        },
+        remove: function(key,value){
+          if(HashMaps.exists.call(HashMaps.target,key,value)) return (delete HashMaps.target[key]);
+        },
+        add: function(key,value,validator,force){
+          if(!validator) validator = validatorDefault;
+          if(HashMaps.exists.call(HashMaps.target,key) || !validator(value)) return;
+          HashMaps.target[key] = value;
+          return true;
+        },
+        modify: function(key,value,validator){
+          if(!validator) validator = validatorDefault;
+          if(!validator(value)) return ;
+          if(!HashMaps.exists.call(HashMaps.target,key)) return HashMaps.add(key,value,validator);
+          HashMaps.target[key] = value;
+          return true;
+        },
+        get: function(key){
+          return this.fetch(key);
+        },
+        KV: function(){
+          return [util.keys(this.target), util.values(this.target)];
         }
-        return false;
-      },
-      remove: function(key,value){
-        if(HashMaps.exists.call(HashMaps.target,key,value)) return (delete HashMaps.target[key]);
-      },
-      add: function(key,value,validator,force){
-        if(!validator) validator = validatorDefault;
-        if(HashMaps.exists.call(HashMaps.target,key) || !validator(value)) return;
-        HashMaps.target[key] = value;
-        return true;
-      },
-      modify: function(key,value,validator){
-        if(!validator) validator = validatorDefault;
-        if(!validator(value)) return ;
-        if(!HashMaps.exists.call(HashMaps.target,key)) return HashMaps.add(key,value,validator);
-        HashMaps.target[key] = value;
-        return true;
-      },
-      get: function(key){
-        return this.fetch(key);
-      },
-      KV: function(){
-        return [util.keys(this.target), util.values(this.target)];
-      }
-    };
+      };
 
-    return HashMaps;
+      return HashMaps;
   };
 
   AppStack.MapDecorator = AppStack.HashHelpers;
-
 
   AppStack.ASColors = (function(AppStack){
 
@@ -3773,328 +3237,8 @@ module.exports = (function(core){
       });
 
     });
-
-
   })(AppStack);
 
-  AppStack.Promise = (function(){
-
-       var Arr = Array.prototype,
-        Obj = Object.prototype,
-        util = AppStack.Util,
-        typeOf = function(o,type){
-          var res = ({}).toString.call(o).replace(/\[object /,'').replace(/\]$/,'').toLowerCase();
-          if(type) return (res === type);
-          return res;
-        },
-        Splice = function(arg,b,e){
-          return Arr.splice.call(arg,b || 0,e || arg.length);
-        },
-        getKeys = function(o){
-          var keys = [];
-          for(var i in o){ keys.push(i); }
-          return keys;
-        },
-        eachSync = function(obj,iterator,complete,scope,breaker){
-                if(!iterator || typeof iterator !== 'function') return false;
-                if(typeof complete !== 'function') complete = function(){};
-
-
-                var step = 0, keys = getKeys(obj),fuse;
-
-                // if(typeof obj === 'string') obj = this.values(obj);
-
-                if(!keys.length) return false;
-
-                fuse = function(){
-                  var key = keys[step];
-                  var item = obj[key];
-
-                  (function(z,a,b,c){
-                    if(breaker && (breaker.call(z,a,b,c))){ /*complete.call(z);*/ return; }
-                    iterator.call(z,a,b,c,function completer(err){
-                        if(err){
-                          complete.call(z,err);
-                          complete = function(){};
-                        }else{
-                          step += 1;
-                          if(step === keys.length) return complete.call(z);
-                          else return fuse();
-                        }
-                    });
-                 }((scope || this),item,key,obj));
-                };
-
-                fuse();
-          },
-        Promise = (function(){
-
-          var generator = function(fn){
-
-            var fire = function(arr,args,ctx){
-              return eachSync(arr,function(e,i,o,c){
-                if(e && typeOf(e,'function'))
-                  e.apply(ctx,(typeOf(args,'array') ? args : [args]));
-                c(false);
-              });
-            },
-            proxy = function(fn,scope){
-              return function(){
-                var args = Arr.splice.call(arguments,0,arguments.length);
-                return fn.apply(scope,args);
-              };
-            },
-            p = {
-              cfg: {
-                resolved: false,
-                rejected: false,
-              },
-              state: util.bind(function(){
-                if(this.cfg.resolved && !this.cfg.rejected) return "resolved";
-                if(!this.cfg.resolved && this.cfg.rejected) return "rejected";
-                if(!this.cfg.resolved && !this.cfg.rejected) return "pending";
-              },p),
-              resLists:{ done: [], fail: [], notify: [] },
-              lists:{ done: [], fail: [], notify: [] }
-            };
-
-            p.destroy = function(){
-               util.explode(resLists.done);
-               util.explode(resLists.fail);
-               util.explode(resLists.notify);
-               util.explode(lists.done);
-               util.explode(lists.fail);
-               util.explode(lists.notify);
-            };
-
-            p.done = util.bind(function(fn){
-              if(typeof fn !== 'function') return this;
-              var args = this.resLists.done;
-              if(this.cfg.resolved && !this.cfg.rejected){ fn.apply(args[1],args[0]); return this; };
-              if(this.lists.done.indexOf(fn) !== -1) return;
-              this.lists.done.push(fn);
-              return this.promise();
-            },p);
-
-            p.fail = util.bind(function(fn){
-              if(typeof fn !== 'function') return this;
-              var args = this.resLists.fail;
-              if(!this.cfg.resolved && this.cfg.rejected){ fn.apply(args[1],args[0]); return this; };
-              if(this.lists.fail.indexOf(fn) !== -1) return;
-              this.lists.fail.push(fn);
-              return this.promise();
-            },p);
-
-            p.progress = util.bind(function(fn){
-              if(typeof fn !== 'function') return this;
-              var args = this.resLists.notify;
-              if(this.cfg.resolved || this.cfg.rejected){ fn.apply(args[1],args[0]); return this; };
-              if(this.lists.notify.indexOf(fn) !== -1) return;
-              this.lists.notify.push(fn);
-              return this.promise();
-            },p);
-
-            p.then = util.bind(function(done,fail,progressfn){
-              var self = this;
-              var defer = generator();
-
-
-              if(!!done){
-                  self.done(function(){
-                    var args = Arr.splice.call(arguments,0,arguments.length);
-                    var ret = done.apply({},args);
-
-                    if(!ret) return self.done(function(){
-                      var args = Arr.splice.call(arguments,0,arguments.length);
-                      defer.resolveWith(args,defer);
-                    });
-
-                    if(typeof ret['isPromise'] !== 'undefined' && ret.isPromise()){
-                      ret.done(function(){
-                        var args = Arr.splice.call(arguments,0,arguments.length);
-                        defer.resolveWith(args,defer);
-                      });
-                    }else defer.resolve(ret);
-                });
-              }
-
-              if(!!fail){
-                self.fail(function(n){
-                    var args = Arr.splice.call(arguments,0,arguments.length);
-                    var ret = fail.apply({},args);
-
-                    if(!ret) return self.fail(function(){
-                      var args = Arr.splice.call(arguments,0,arguments.length);
-                      defer.rejectWith(args,defer);
-                    });
-
-                    if(typeof ret['isPromise'] !== 'undefined' && ret.isPromise()){
-                      ret.fail(function(){
-                        var args = Arr.splice.call(arguments,0,arguments.length);
-                        defer.rejectWith(args,defer);
-                      });
-
-                    }else defer.reject(ret);
-                });
-              }
-
-             if(!!progressfn){
-               self.progress(function(){
-
-                    var args = Arr.splice.call(arguments,0,arguments.length);
-                    var ret = progressfn.apply({},args);
-
-
-
-                    if(!ret) return self.progress(function(){
-                      var args = Arr.splice.call(arguments,0,arguments.length);
-                      defer.notifyWith(args,defer);
-                    });
-
-                    if(typeof ret['isPromise'] !== 'undefined' && ret.isPromise()){
-                      ret.progress(function(){
-                        var args = Arr.splice.call(arguments,0,arguments.length);
-                        defer.notifyWith(args,defer);
-                      });
-                    }else defer.notify(ret);
-               });
-             }
-
-              return defer;
-            },p);
-
-            p.resolveWith = util.bind(function(args,ctx){
-              if(this.cfg.resolved || this.cfg.rejected) return;
-              this.cfg.rejected = false;
-              this.cfg.resolved = true;
-              this.resLists.done = [args,ctx];
-              this.resLists.notify = [args,ctx];
-              fire(this.lists.done,args,ctx);
-              fire(this.lists.notify,args,ctx);
-              return this;
-            },p);
-
-            p.rejectWith = util.bind(function(args,ctx){
-              if(this.cfg.resolved || this.cfg.rejected) return;
-              this.cfg.rejected = true;
-              this.cfg.resolved = false;
-              this.resLists.fail = [args,ctx];
-              this.resLists.notify = [args,ctx];
-              fire(this.lists.fail,args,ctx);
-              fire(this.lists.notify,args,ctx);
-              return this;
-            },p);
-
-            p.notifyWith = util.bind(function(args,ctx){
-              if(this.cfg.resolved || this.cfg.rejected) return;
-              // this.cfg = "resolved",
-              this.resLists.notify = [args,ctx];
-              fire(this.lists.notify,args,ctx);
-              return this;
-            },p);
-
-            p.resolve = util.bind(function(){
-              var args = Arr.splice.call(arguments,0,arguments.length);
-              this.resolveWith(args,this);
-              return this;
-            },p);
-
-            p.reject = util.bind(function(){
-              var args = Arr.splice.call(arguments,0,arguments.length);
-              this.rejectWith(args,this);
-              return this;
-            },p);
-
-            p.notify = util.bind(function(){
-              var args = Arr.splice.call(arguments,0,arguments.length);
-              this.notifyWith(args,this);
-              return this;
-            },p);
-
-            p.promise = util.bind(function(){
-              var shell = {},self = this;
-              shell.fail = function(fn){
-                  self.fail(fn);
-                  return this;
-              };
-              shell.progress = function(fn){
-                  self.progress(fn);
-                  return this;
-              };
-              shell.done = function(fn){
-                  self.done(fn);
-                  return this;
-              };
-
-              shell.state = proxy(this.state,this);
-              shell.then = proxy(this.then,this);
-              shell.promise = function(){return this; }
-              shell.isPromise = function(){ return true; }
-
-              self.promise = function(){
-                return shell;
-              };
-
-              return shell;
-            },p);
-
-            p.isPromise = function(){ return true; };
-
-            if(fn && typeof fn === 'function'){
-              try{
-                fn(p);
-              }catch(e){
-                p.reject(e);
-              };
-              return p;
-            }
-            if(fn && typeof fn !== 'function' && fn !== null && fn !== false && fn !== 'undefined') return p.resolve(fn);
-            if(typeof fn !== 'function' && fn === false) return p.reject(fn);
-
-            return p;
-          };
-
-          return {
-            name:"AppStack.Promise",
-            description: "A Promise A spec compatible promise object",
-            licenses:[ { type: "mit", url: "http://mths.be/mit" }],
-            author: "Alexander Adeniyi Ewetumo",
-            create: function(fn){
-              return generator(fn);
-            },
-            when: function(){
-              var args = Arr.splice.call(arguments,0,arguments.length),
-              len = args.length,
-              counter = 0,
-              // set = [],
-              argd = [],
-              defer = generator();
-
-              eachSync(args,function(e,i,o,c){
-                // if(e && typeof e !== 'function') return c(false);
-                var a = (e['isPromise'] && e.isPromise()) ? e : generator(e);
-                a.then(function(){
-                  counter += 1;
-                  if(counter === len) defer.resolve(argd);
-                },function(){
-                  defer.reject(argd);
-                },function(){
-                  var res = Arr.splice.call(arguments,0,arguments.length);
-                  argd.push(res.length == 1 ? res[0] : res);
-                });
-
-                // set.push(a);
-                c(false);
-              });
-
-              return defer;
-            },
-          };
-        })();
-
-        return Promise;
-
-  })();
 
   AppStack.Distributors = function(){
       var chain = {
@@ -4109,6 +3253,10 @@ module.exports = (function(core){
       chain.callbacks = [];
       chain.doneCallbacks = [];
       chain._locked = false;
+
+      chain.removeAllDone = function(){
+        this.doneCallbacks.length = 0;
+      };
 
       chain.removeAll = function(){
         this.callbacks.length = 0;
@@ -4146,11 +3294,13 @@ module.exports = (function(core){
       };
 
       chain.add = function(fn){
+        if(typeof fn !== 'function') return;
         if(this.callbacks.indexOf(fn) != -1 || this.locked() || this.disabled()) return;
         this.callbacks.push(fn);
       };
 
       chain.addOnce = function(fn){
+        if(typeof fn !== 'function') return;
         if(this.callbacks.indexOf(fn) != -1 || this.locked() || this.disabled()) return;
         var self = this;
         fn.__once = true;
@@ -4464,80 +3614,8 @@ module.exports = (function(core){
     return mutator;
   };
 
-  AppStack.MutatorPromise = function(fn){
-
-    var util = AppStack.Util, mutator = {
-      name:"AppStack.MutatorPromise",
-      description: "uses promise to create a top-down mutating tree where a return type can be mutated",
-      licenses:[ { type: "mit", url: "http://mths.be/mit" }],
-      author: "Alexander Adeniyi Ewetumo",
-    };
-
-    mutator._locked = false;
-    mutator.mutators = AppStack.Promise.create();
-    mutator.history = [];
-
-    mutator.add = function(fn){
-      if(this.locked() || this.disabled()) return;
-      var current = this.history[this.history.length - 1];
-
-      this.history.push(current.then(function(){
-        var args = util.toArray(arguments);
-        return fn.apply(this,args);
-      }));
-    };
-
-    mutator.fireWith = function(context,args){
-      if(this.disabled()) return;
-      var self = this,
-        first = this.history[0],
-        last = this.history[this.history.length - 1];
-
-      first.resolveWith(args,context);
-
-      last.done(function(){
-        var args = util.toArray(arguments)
-        self.mutators.resolveWith(args,this);
-      });
-    }
-
-    mutator.close = function(){
-      util.explode(this.history);
-      this.mutators.destroy();
-      util.explode(this.mutators);
-      this.disable();
-    };
-
-    mutator.fire = function(){
-      if(this.disabled()) return;
-        var args = util.toArray(arguments);
-        this.fireWith(this,args);
-    };
-
-    mutator.lock = function(){
-      this._locked = true;
-    };
-
-    mutator.disable = function(){
-      this.mutators = null;
-    };
-
-    mutator.disabled = function(){
-      return this.mutators === null;
-    };
-
-    mutator.locked = function(){
-      return this._locked === true;
-    };
-
-
-    mutator.history.push(AppStack.Promise.create());
-    mutator.add(fn);
-    return mutator;
-  };
 
   AppStack.StateManager = (function(){
-
       var util = AppStack.Util, manager = {};
 
       manager.StateObject = function(focus,list){
@@ -4678,7 +3756,6 @@ module.exports = (function(core){
     return ij;
   };
 
-
   AppStack.PositionArrayInjector = function(){
     var ij = AppStack.ArrayInjector();
     ij._inject = ij.inject;
@@ -4772,7 +3849,7 @@ module.exports = (function(core){
 });
 
 }).call(this,require('_process'))
-},{"_process":9}],6:[function(require,module,exports){
+},{"_process":9}],5:[function(require,module,exports){
 module.exports = (function(core){
 
   var as = ds = core, util = as.Util;
@@ -5887,7 +4964,7 @@ module.exports = (function(core){
 
 });
 
-},{}],7:[function(require,module,exports){
+},{}],6:[function(require,module,exports){
 module.exports = (function(core){
 
  /* former schemes code */
@@ -6310,7 +5387,7 @@ module.exports = (function(core){
   };
 
   core.GuardedPromise = function(fn){
-    var pm = as.Promise.create();
+    var pm = as.Future.make();
     var gm = core.Guarded(fn);
 
     // gm.onError(function(e){ pm.reject(e); });
@@ -6318,13 +5395,13 @@ module.exports = (function(core){
     // pm.done(function(){ console.log('done',arguments); });
     // pm.fail(function(){ console.log('fails',arguments); });
 
-    gm.onError(pm.reject);
-    gm.onSafe(pm.resolve);
+    gm.onError(pm.$bind(pm.completeError));
+    gm.onSafe(pm.$bind(pm.complete));
     // gm.onSafe(function(){
     //   console.log('i gotin sad');
     // });
 
-    gm.promise = pm;
+    gm.future = pm;
     return gm;
   };
 
@@ -6430,18 +5507,19 @@ module.exports = (function(core){
     var pmStack = [];
     var proxy;
 
-    units.done = as.Promise.create();
+    // units.done = as.Promise.create();
+    units.done = as.Future.make();
     units.whenDone = function(fn){
-      units.done.done(fn);
+      units.then(fn);
     };
     units.whenFailed = function(fn){
-      units.done.fail(fn);
+      units.catchError(fn);
     };
 
     var guardpm = function(fn){
       var sg = core.GuardedPromise(fn);
       stacks.push(sg.stacks);
-      pmStack.push(sg.promise.promise());
+      pmStack.push(sg.future);
       return sg;
     };
 
@@ -6461,9 +5539,10 @@ module.exports = (function(core){
     units.proxy = function(){ return proxy; };
     units.state = function(){ return state; };
     units.wm = core.Middleware(function(m){
-      var wait = as.Promise.when.apply(null,pmStack);
-      wait.done(function(e){  report(true);  units.done.resolve(e); });
-      wait.fail(function(e){  report(false); units.done.reject(e); });
+      var wait = as.Future.wait.apply(null,pmStack);
+      wait.chain(units.done)
+      units.done.then(function(e){  report(true);   });
+      units.done.catchError(function(e){  report(false); });
     });
 
 
@@ -7111,131 +6190,6 @@ module.exports = (function(core){
     unregister: function(){ return this.remove.apply(this,arguments); },
   });
 
-  core.StreamSelect = core.Class({
-      init: function(shouldRemove,stream){
-        var self = this,locked = false;
-        this.shouldRemove = core.valids.isBoolean(shouldRemove) ? shouldRemove : false;
-
-        var boot = core.Promise.create();
-        this.boot = boot.promise();
-        this.packets = ds.List();
-        this.streams = core.Stream.make();
-        this.mutts = this.streams.mutts;
-        this.$ = {};
-
-        this.isLocked = function(){ return !!locked; };
-
-        this.lock = function(){
-          this.locked = true;
-        };
-
-        this.__unlock = function(){
-          this.locked = false;
-        };
-
-        this.streams.on(function(i){
-          if(!locked) self.packets.add(i);
-        });
-
-        this.streams.once(function(j){
-          boot.resolve(self);
-        });
-
-        var createMuxer = core.StreamSelect.createMuxer(this);
-        this.createMux = createMuxer(this.$);
-
-        this.createMux('one',function(fn,item,end){
-          if(!!fn(item,end)){
-            return end() || true;
-          }
-        });
-
-        this.createMux('list',function(fn,m,get,sm){
-          var list = [], kill = false;
-          while(!kill && m.moveNext()){
-            var item = get(m);
-            if(!!fn.call(null,item,function(){ kill = true; }))
-              list.push(item);
-          };
-          sm.emit(list);
-        },true);
-
-        this.createMux('all',function(fn,item,end){
-          return !!fn(item,end);
-        });
-
-        if(stream) this.bindStream(stream);
-      },
-      bindStream: function(stream){
-        if(!core.Stream.isType(stream) || this.isLocked()) return;
-        var pk = core.funcs.bind(this.streams.emit,this.streams);
-        stream.on(pk);
-        this.streams.onEvent('close',function(){
-          stream.off(pk);
-        });
-      },
-      destroy: function(){
-        this.streams.close();
-        this.packets.clear();
-      },
-      emit: function(f){
-        if(this.isLocked()) return;
-        this.streams.emit(f);
-      }
-    },{
-      createMuxer: function(select){
-
-        var getCurrent = function(k){
-          if(select.shouldRemove){
-            var item = select.packets.removeHead();
-            if(item) return item.data;
-          }
-          return k.current();
-        };
-
-        var operationGenerator = function(fn,overtake){
-          var ps = core.Stream.make();
-          ps.pause();
-          select.boot.done(function(r){
-            var item, endKick = false,
-                end = function(){ endKick = true; },
-                move = select.packets.iterator();
-
-            // ps.onEvent('drain',function(){ ps.close(); });
-
-            if(overtake){
-              fn.call(null,move,getCurrent,ps);
-            }
-            else{
-              while(!endKick && move.moveNext()){
-                item = getCurrent(move);
-                if(!!fn.call(null,item,end)){
-                  ps.emit(item);
-                }
-              };
-            }
-
-            ps.resume();
-          });
-          return ps;
-        };
-
-        return function(ops){
-          return function(id,fn,noIterate){
-            if(!core.valids.isString(id) && !core.valids.isFunction(fn)) return null;
-            var pass = core.valids.isBoolean(noIterate) ? noIterate : false;
-            if(!!ops[id]) return null;
-            return ops[id] = (function(gn){
-              gn = gn || funcs.always(true);
-              return operationGenerator(function(){
-                var args = [gn].concat(core.enums.toArray(arguments));
-                return fn.apply(null,args);
-              },pass);
-            });
-          };
-        };
-      }
-  });
 
   core.Hooks = core.Class({
     init: function(id){
@@ -7457,6 +6411,7 @@ module.exports = (function(core){
         if(this.fired.indexOf('*') === -1) this.fired.push('*')
       }
       var ev = this.events(name);
+      if(ev.totalSize() <= 0) return;
       ev.distributeWith(ev,rest);
       if(this.fired.indexOf(name) === -1){ this.fired.push(name);}
     },
@@ -9681,6 +8636,9 @@ module.exports = (function(core){
     mapobj: function(fn,fc){
       return this.map(fn,fc);
     },
+    resetLength: function(n){
+      this.data.length = n || 0;
+    },
     set: function(i,d){
       if(i > this.length()) return;
       this.$super(i,d);
@@ -9699,6 +8657,13 @@ module.exports = (function(core){
     },
     shift: function(){
       return core.Sequence.value(this.data.shift.apply(this.data,arguments));
+    },
+    indexOf: function(i){
+      return this.data.indexOf(i);
+    },
+    remove: function(c){
+      if(!this.hasValue(c)) return;
+      return core.enums.yankNth(this.data,this.indexOf(c),this.indexOf(c));
     },
   },{});
 
@@ -10591,7 +9556,8 @@ module.exports = (function(core){
   };
 });
 
-},{}],8:[function(require,module,exports){
+},{}],7:[function(require,module,exports){
+(function (global){
 var as = {};
 require('./lib/as.js')(as);
 require('./lib/as-contrib.js')(as);
@@ -10599,8 +9565,99 @@ require('./lib/ds.js')(as);
 require('./lib/extenders.js')(as);
 
 module.exports = as;
+global.Stackq = as;
 
-},{"./lib/as-contrib.js":4,"./lib/as.js":5,"./lib/ds.js":6,"./lib/extenders.js":7}],9:[function(require,module,exports){
+}).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
+},{"./lib/as-contrib.js":3,"./lib/as.js":4,"./lib/ds.js":5,"./lib/extenders.js":6}],8:[function(require,module,exports){
+(function (global){
+///shims for magnus
+//
+
+var _ = require('stackq');
+var Shims = {};
+
+Shims.RequestFrame = (function(){
+  var map = {};
+  var lastTime = 0;
+  var vendors = ['ms', 'moz', 'webkit', 'o'];
+  for(var x = 0; x < vendors.length && !global.requestAnimationFrame; ++x) {
+    global.requestAnimationFrame = global[vendors[x]+'RequestAnimationFrame'];
+   global.cancelAnimationFrame = global[vendors[x]+'CancelAnimationFrame']
+    || global[vendors[x]+'CancelRequestAnimationFrame'];
+  }
+
+  if (!global.requestAnimationFrame){
+    map.requestAnimationFrame = function(callback, element) {
+      var currTime = new Date().getTime();
+      var timeToCall = Math.max(0, 16 - (currTime - lastTime));
+      var id = global.setTimeout(function() { callback(currTime + timeToCall); },
+      timeToCall);
+      lastTime = currTime + timeToCall;
+      return id;
+    };
+  }else {
+    map.requestAnimationFrame = function(){
+      return global.requestAnimationFrame.apply(global,arguments);
+    };
+  }
+
+  if (!global.cancelAnimationFrame){
+   map.cancelAnimationFrame = function(id) {
+      clearTimeout(id);
+   };
+ }else{
+    map.cancelAnimationFrame = function(){
+      return global.cancelAnimationFrame.apply(global,arguments);
+    };
+ }
+
+ return map;
+}());
+
+Shims.createFrame = function(fn){
+  if(typeof fn !== 'function') return;
+
+  var dist = _.Distributors();
+  var paused = false,res,id, target = function Cycle(f){
+    res = fn(f);
+    dist.distribute(f);
+    id = Shims.RequestFrame.requestAnimationFrame(Cycle);
+    return res;
+  };
+  
+  id = Shims.RequestFrame.requestAnimationFrame(target);
+
+  return {
+    id: function(){ return id },
+    dist: function(){ return dist; },
+    cancel: function(){ 
+      Shims.RequestFrame.cancelAnimationFrame(id); 
+    },
+    pause: function(){ 
+      if(!!paused) return
+      paused = true;
+      this.cancel(); 
+    },
+    resume: function(){
+      if(!paused) return
+      id = Shims.RequestFrame.requestAnimationFrame(target);
+    },
+    on: _.funcs.bind(dist.add,dist),
+    onEnd: _.funcs.bind(dist.addDone,dist),
+    once: _.funcs.bind(dist.addOnce,dist),
+    onEndOnce: _.funcs.bind(dist.addDoneOnce,dist),
+    off: _.funcs.bind(dist.remove,dist),
+    offEnd: _.funcs.bind(dist.removeEnd,dist),
+    offAll: _.funcs.bind(dist.removeAll,dist),
+    offAllEnd: _.funcs.bind(dist.removeAllDone,dist),
+  };
+};
+
+module.exports = Shims;
+global.Shims = Shims;
+
+}).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
+},{"stackq":7}],9:[function(require,module,exports){
 // shim for using process in browser
 
 var process = module.exports = {};
