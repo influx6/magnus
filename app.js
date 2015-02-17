@@ -20,4 +20,3 @@ setTimeout(function(){
   rules.get().set('id','snick');
 },6000);
 
-// app.dom().on('rendered',function(f){ console.log('rendering:',f); });
