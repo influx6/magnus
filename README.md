@@ -53,3 +53,6 @@
   console.log(atom.render())
 
 ```
+
+###Note
+ It is still under development,allthough the logic works but needs to be proper and simple API
