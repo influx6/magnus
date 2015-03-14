@@ -1,5 +1,5 @@
 # Magnus
-  the combination of sequences with immutables and a the idea of HTML generation make this library.Magnus is about creating a very simple and basic UI library that can work both on server side and client side with minimal effort. By combining sequence like structures that have cursors and are automatically updated based on changes within the local cursor regions, we can create elaborate and connected UI structures easily renderable to Html Strings which only are updated once a change occurs i.e after the first render the output is cached until there is a change.
+  Magnus is an idea that combines immutable, self notifying sequences and UI rendering for very simple,efficient and basic UI rendering that does not get in the way of your work,its geared towards working both on server and client with minimal effort. By combining sequence like structures that have cursors and are automatically updated based on changes within the local cursor regions, we can create elaborate and connected UI structures easily renderable to Strings or DOM structures which only are updated once a change occurs i.e after the first render, the output is cached until there is a change and the change is localized to the cursor and its element rather than the whole structure/UI.
 
 ##Install
 
